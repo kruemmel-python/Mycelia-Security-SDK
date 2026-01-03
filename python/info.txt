@@ -1,0 +1,8 @@
+pyinstaller --noconsole --onefile --name "MyceliaVault_Enterprise" --add-data "..\bin\CC_OpenCl.dll;." --hidden-import "mycelia_vault_v4" mycelia_gui_v4.py
+
+
+ pyinstaller --noconsole --onefile --name "MyceliaChat_Client" --add-data "../bin/CC_OpenCl.dll;." --hidden-import "mycelia_chat_engine" mycelia_chat.py
+ 
+ 
+ 
+ pyinstaller --onefile --name "MyceliaChat_Server" chat_server.py  

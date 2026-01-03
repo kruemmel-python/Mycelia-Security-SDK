@@ -1,0 +1,12 @@
+[
+    {
+        "name": "Ralf",
+        "email": "alugilak@gmail.com",
+        "password": "",
+        "smtp_server": "smtp.gmail.com",
+        "smtp_port": "587",
+        "imap_server": "imap.gmail.com",
+        "imap_port": "993",
+        "auth_type": "oauth2"
+    }
+]
