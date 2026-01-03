@@ -15,9 +15,15 @@ except ImportError:
     sys.exit(1)
 
 # --- Konfiguration ---
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 PORT = 9999
 # Dieses Secret muss sicher sein! Es schützt die Seeds.
-APP_SECRET = "MyceliaEnterpriseSecretKey2025"
+APP_SECRET = require_env("MYCELIA_ENGINE_PASSWORD")
 
 print("[Proxy] Initialisiere GPU Engine...")
 try:

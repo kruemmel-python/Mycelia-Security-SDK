@@ -2,8 +2,22 @@
 session_start();
 if (!isset($_SESSION['user_id'])) { header("Location: index.php"); exit; }
 
-// Verbindung mit Passwort 1234
-$pdo = new PDO('mysql:host=127.0.0.1;dbname=mycelia_secure_db', 'root', '1234');
+function require_env($name) {
+    $value = getenv($name);
+    if ($value === false || $value === '') {
+        http_response_code(500);
+        die("Fehlende Umgebungsvariable: $name");
+    }
+    return $value;
+}
+
+// Verbindung mit Umgebungsvariablen
+$db_host = require_env('MYCELIA_DB_HOST');
+$db_name = require_env('MYCELIA_DB_NAME');
+$db_user = require_env('MYCELIA_DB_USER');
+$db_pass = require_env('MYCELIA_DB_PASSWORD');
+$dsn = "mysql:host={$db_host};dbname={$db_name}";
+$pdo = new PDO($dsn, $db_user, $db_pass);
 require 'api.php';
 
 $uid = $_SESSION['user_id'];
