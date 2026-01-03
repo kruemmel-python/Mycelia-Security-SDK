@@ -5,6 +5,7 @@ import struct
 import base64
 import sys
 import os
+from dotenv import load_dotenv
 
 # --- Engine laden ---
 # Wir nutzen die Klasse aus deiner existierenden Datei
@@ -14,10 +15,18 @@ except ImportError:
     print("FEHLER: mycelia_chat_engine.py nicht gefunden!")
     sys.exit(1)
 
+load_dotenv()
+
+def require_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 # --- Konfiguration ---
 PORT = 9999
 # Dieses Secret muss sicher sein! Es schützt die Seeds.
-APP_SECRET = "MyceliaEnterpriseSecretKey2025"
+APP_SECRET = require_env("APP_SECRET")
 
 print("[Proxy] Initialisiere GPU Engine...")
 try:

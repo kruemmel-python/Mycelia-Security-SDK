@@ -1,8 +1,14 @@
 <?php
 session_start();
+if (!file_exists('config.php')) {
+    die("Fehler: config.php fehlt!");
+}
+require_once 'config.php';
+
 // Verbindung mit Passwort 1234
 try {
-    $pdo = new PDO('mysql:host=127.0.0.1;dbname=mycelia_secure_db', 'root', '1234');
+    $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME;
+    $pdo = new PDO($dsn, DB_USER, DB_PASS);
 } catch (PDOException $e) {
     die("Konnte nicht zur DB verbinden. Bitte erst setup_db.php ausführen!");
 }

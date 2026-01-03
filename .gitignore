@@ -1,0 +1,5 @@
+.env
+html/.env
+html/config.php
+__pycache__/
+*.pyc

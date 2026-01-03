@@ -5,6 +5,7 @@ import struct
 import os
 import hashlib
 from flask import Flask, request, session, redirect, url_for, render_template_string
+from dotenv import load_dotenv
 
 # --- Mycelia Engine Import ---
 try:
@@ -13,17 +14,25 @@ except ImportError:
     print("CRITICAL: mycelia_chat_engine.py fehlt!")
     exit(1)
 
+load_dotenv()
+
+def require_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 # --- Konfiguration ---
 app = Flask(__name__)
 app.secret_key = "WebSessionSecretKey"
-APP_SECRET = "MeinSuperGeheimesServerPasswort2025" 
+APP_SECRET = require_env("APP_SECRET")
 
 # MySQL Konfiguration
 db_config = {
-    'user': 'root',
-    'password': '1234',  # Dein Passwort
-    'host': '127.0.0.1',
-    'database': 'mycelia_secure_db',
+    'user': require_env('DB_USER'),
+    'password': require_env('DB_PASS'),
+    'host': require_env('DB_HOST'),
+    'database': require_env('DB_NAME'),
     'raise_on_warnings': False
 }
 

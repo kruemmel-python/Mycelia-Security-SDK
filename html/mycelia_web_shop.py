@@ -7,6 +7,7 @@ import hashlib
 import io
 import time
 from flask import Flask, request, session, redirect, url_for, render_template_string, flash, send_from_directory
+from dotenv import load_dotenv
 
 # --- Mycelia Engine Import ---
 try:
@@ -15,6 +16,14 @@ except ImportError:
     print("CRITICAL: mycelia_chat_engine.py fehlt!")
     exit(1)
 
+load_dotenv()
+
+def require_env(name):
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 # --- Konfiguration ---
 app = Flask(__name__)
 app.secret_key = "SuperSecretShopSessionKey"
@@ -22,10 +31,10 @@ UPLOAD_FOLDER = 'static/uploads'
 
 # MySQL Konfiguration (PASSWORT ANPASSEN!)
 db_config = {
-    'user': 'root',
-    'password': '1234',  # Dein Passwort
-    'host': '127.0.0.1',
-    'database': 'mycelia_secure_db',
+    'user': require_env('DB_USER'),
+    'password': require_env('DB_PASS'),
+    'host': require_env('DB_HOST'),
+    'database': require_env('DB_NAME'),
     'raise_on_warnings': False
 }
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
@@ -35,7 +44,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 print("[Server] Initialisiere Mycelia GPU Engine...")
 try:
     engine = MyceliaChatEngine(0)
-    engine.set_password("MeinSuperGeheimesServerPasswort2025") # Secret für alle Krypto-Operationen
+    engine.set_password(require_env('APP_SECRET')) # Secret für alle Krypto-Operationen
 except Exception as e:
     print(f"[Error] GPU Init fehlgeschlagen: {e}")
     exit(1)
