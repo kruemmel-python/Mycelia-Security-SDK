@@ -1,0 +1,7 @@
+<?php
+// Diese Datei als config.php kopieren und in .gitignore lassen.
+define('DB_HOST', '127.0.0.1');
+define('DB_USER', 'root');
+define('DB_PASS', '1234');
+define('DB_NAME', 'mycelia_secure_db');
+?>

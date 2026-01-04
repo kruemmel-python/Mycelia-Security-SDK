@@ -1,7 +1,12 @@
 <?php
-$host = '127.0.0.1';
-$user = 'root';
-$pass = '1234'; // Dein Passwort
+if (!file_exists('config.php')) {
+    die("Fehler: config.php fehlt!");
+}
+require_once 'config.php';
+
+$host = DB_HOST;
+$user = DB_USER;
+$pass = DB_PASS;
 
 try {
     // 1. Verbindung ohne DB, um sie zu erstellen
@@ -11,11 +16,11 @@ try {
     echo "Verbindung zu MySQL erfolgreich.<br>";
 
     // 2. Datenbank erstellen
-    $pdo->exec("CREATE DATABASE IF NOT EXISTS mycelia_secure_db");
+    $pdo->exec("CREATE DATABASE IF NOT EXISTS " . DB_NAME);
     echo "Datenbank 'mycelia_secure_db' geprüft/erstellt.<br>";
 
     // 3. Tabelle erstellen
-    $pdo->exec("USE mycelia_secure_db");
+    $pdo->exec("USE " . DB_NAME);
     $sql = "CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) NOT NULL UNIQUE,
