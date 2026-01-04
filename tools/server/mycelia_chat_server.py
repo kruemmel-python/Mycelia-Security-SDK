@@ -53,7 +53,7 @@ class ChatServer:
                 if message.get("roomId") != room_id:
                     continue
                 await self.broadcast(room_id, payload)
-        except (asyncio.IncompleteReadError, ConnectionResetError):
+        except (asyncio.IncompleteReadError, ConnectionResetError, OSError):
             pass
         except Exception:
             pass
@@ -65,7 +65,10 @@ class ChatServer:
                         if not self.rooms[room_id]:
                             del self.rooms[room_id]
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (ConnectionResetError, OSError):
+                pass
 
     async def broadcast(self, room_id: str, payload: bytes) -> None:
         async with self.lock:
