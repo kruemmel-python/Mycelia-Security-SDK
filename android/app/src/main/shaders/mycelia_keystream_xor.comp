@@ -1,0 +1,104 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 17, std430) buffer InputBuffer { uint data[]; } inputBuf;
+layout(set = 0, binding = 18, std430) buffer OutputBuffer { uint data[]; } outputBuf;
+
+layout(push_constant) uniform XorParams {
+    uint key[8];
+    uint nonce[3];
+    uint counter_base;
+    uint offset_in_block;
+    uint data_len;
+} params;
+
+uint rotl(uint v, uint c) {
+    return (v << c) | (v >> (32u - c));
+}
+
+void quarter_round(inout uint a, inout uint b, inout uint c, inout uint d) {
+    a += b; d ^= a; d = rotl(d, 16u);
+    c += d; b ^= c; b = rotl(b, 12u);
+    a += b; d ^= a; d = rotl(d, 8u);
+    c += d; b ^= c; b = rotl(b, 7u);
+}
+
+void chacha20_block(uint counter, out uint out_block[16]) {
+    uint state[16];
+    state[0] = 0x61707865u;
+    state[1] = 0x3320646eu;
+    state[2] = 0x79622d32u;
+    state[3] = 0x6b206574u;
+    state[4] = params.key[0];
+    state[5] = params.key[1];
+    state[6] = params.key[2];
+    state[7] = params.key[3];
+    state[8] = params.key[4];
+    state[9] = params.key[5];
+    state[10] = params.key[6];
+    state[11] = params.key[7];
+    state[12] = counter;
+    state[13] = params.nonce[0];
+    state[14] = params.nonce[1];
+    state[15] = params.nonce[2];
+
+    uint working[16];
+    for (int i = 0; i < 16; ++i) {
+        working[i] = state[i];
+    }
+
+    for (int i = 0; i < 10; ++i) {
+        quarter_round(working[0], working[4], working[8], working[12]);
+        quarter_round(working[1], working[5], working[9], working[13]);
+        quarter_round(working[2], working[6], working[10], working[14]);
+        quarter_round(working[3], working[7], working[11], working[15]);
+
+        quarter_round(working[0], working[5], working[10], working[15]);
+        quarter_round(working[1], working[6], working[11], working[12]);
+        quarter_round(working[2], working[7], working[8], working[13]);
+        quarter_round(working[3], working[4], working[9], working[14]);
+    }
+
+    for (int i = 0; i < 16; ++i) {
+        out_block[i] = working[i] + state[i];
+    }
+}
+
+uint keystream_byte(uint counter, uint byte_in_block) {
+    uint block[16];
+    chacha20_block(counter, block);
+    uint word = block[byte_in_block / 4u];
+    uint shift = (byte_in_block & 3u) * 8u;
+    return (word >> shift) & 0xFFu;
+}
+
+void main() {
+    uint word_index = gl_GlobalInvocationID.x;
+    uint base = word_index * 4u;
+    if (base >= params.data_len) {
+        return;
+    }
+
+    uint in_word = inputBuf.data[word_index];
+    uint out_word = in_word;
+
+    for (uint b = 0u; b < 4u; ++b) {
+        uint byte_index = base + b;
+        if (byte_index >= params.data_len) {
+            break;
+        }
+
+        uint absolute_in_block = params.offset_in_block + byte_index;
+        uint block_offset = absolute_in_block / 64u;
+        uint byte_in_block = absolute_in_block % 64u;
+        uint counter = params.counter_base + block_offset;
+
+        uint key_byte = keystream_byte(counter, byte_in_block);
+        uint in_byte = (in_word >> (8u * b)) & 0xFFu;
+        uint out_byte = in_byte ^ key_byte;
+        out_word = (out_word & ~(0xFFu << (8u * b))) | (out_byte << (8u * b));
+    }
+
+    outputBuf.data[word_index] = out_word;
+}
