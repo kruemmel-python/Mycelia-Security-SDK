@@ -91,7 +91,8 @@ class ChatViewModel(
                     port = settings.port,
                     roomId = conversation.seedB64,
                     tlsEnabled = settings.tlsEnabled,
-                    tlsPinSha256 = settings.tlsPinSha256
+                    tlsPinSha256 = settings.tlsPinSha256,
+                    tlsCaPem = settings.tlsCaPem
                 )
                 currentClient = client
                 client.start()

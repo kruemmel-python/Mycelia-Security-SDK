@@ -18,7 +18,10 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.io.ByteArrayInputStream
+import java.security.KeyStore
 import java.security.MessageDigest
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
@@ -32,7 +35,8 @@ class TcpChatClient(
     private val port: Int,
     private val roomId: String,
     private val tlsEnabled: Boolean,
-    private val tlsPinSha256: String
+    private val tlsPinSha256: String,
+    private val tlsCaPem: String
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sendChannel = Channel<ChatPayload>(Channel.BUFFERED)
@@ -143,19 +147,42 @@ class TcpChatClient(
 
     private fun createTlsSocket(): SSLSocket {
         val sslContext = SSLContext.getInstance("TLS")
-        val trustManagers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
-        trustManagers.init(null as java.security.KeyStore?)
-        val defaultTm = trustManagers.trustManagers.filterIsInstance<X509TrustManager>().first()
-        val tm = if (tlsPinSha256.isBlank()) {
-            defaultTm
+        val baseTrustManager = if (tlsCaPem.isBlank()) {
+            defaultTrustManager()
         } else {
-            PinnedTrustManager(defaultTm, tlsPinSha256)
+            trustManagerFromPem(tlsCaPem)
+        }
+        val tm = if (tlsPinSha256.isBlank()) {
+            baseTrustManager
+        } else {
+            PinnedTrustManager(baseTrustManager, tlsPinSha256)
         }
         sslContext.init(null, arrayOf(tm), null)
         val factory = sslContext.socketFactory
         val socket = factory.createSocket(host, port) as SSLSocket
         socket.startHandshake()
         return socket
+    }
+
+    private fun defaultTrustManager(): X509TrustManager {
+        val trustManagers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        trustManagers.init(null as KeyStore?)
+        return trustManagers.trustManagers.filterIsInstance<X509TrustManager>().first()
+    }
+
+    private fun trustManagerFromPem(pem: String): X509TrustManager {
+        val cleaned = pem
+            .replace("-----BEGIN CERTIFICATE-----", "")
+            .replace("-----END CERTIFICATE-----", "")
+            .replace("\\s".toRegex(), "")
+        val certBytes = android.util.Base64.decode(cleaned, android.util.Base64.DEFAULT)
+        val certFactory = CertificateFactory.getInstance("X.509")
+        val cert = certFactory.generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
+        val keyStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null) }
+        keyStore.setCertificateEntry("mycelia_ca", cert)
+        val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
+        tmf.init(keyStore)
+        return tmf.trustManagers.filterIsInstance<X509TrustManager>().first()
     }
 
     private class PinnedTrustManager(

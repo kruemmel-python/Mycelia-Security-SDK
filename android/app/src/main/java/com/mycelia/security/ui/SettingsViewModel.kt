@@ -14,7 +14,7 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
         .stateIn(
             viewModelScope,
             SharingStarted.WhileSubscribed(5000),
-            SettingsState("10.0.2.2", 8989, false, false, "")
+            SettingsState("10.0.2.2", 8989, false, false, "", "")
         )
 
     fun updateHost(host: String) {
@@ -35,5 +35,9 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
 
     fun updateTlsPin(pin: String) {
         viewModelScope.launch { repository.updateTlsPin(pin) }
+    }
+
+    fun updateTlsCaPem(pem: String) {
+        viewModelScope.launch { repository.updateTlsCaPem(pem) }
     }
 }

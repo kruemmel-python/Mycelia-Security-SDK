@@ -17,6 +17,7 @@ class SettingsRepository(private val context: Context) {
     private val compressionKey = booleanPreferencesKey("compression")
     private val tlsKey = booleanPreferencesKey("tls")
     private val pinKey = stringPreferencesKey("tls_pin")
+    private val caKey = stringPreferencesKey("tls_ca_pem")
 
     val settingsFlow: Flow<SettingsState> = context.dataStore.data.map { prefs ->
         SettingsState(
@@ -24,7 +25,8 @@ class SettingsRepository(private val context: Context) {
             port = prefs[portKey] ?: 8989,
             compressionEnabled = prefs[compressionKey] ?: false,
             tlsEnabled = prefs[tlsKey] ?: false,
-            tlsPinSha256 = prefs[pinKey] ?: ""
+            tlsPinSha256 = prefs[pinKey] ?: "",
+            tlsCaPem = prefs[caKey] ?: ""
         )
     }
 
@@ -47,6 +49,10 @@ class SettingsRepository(private val context: Context) {
     suspend fun updateTlsPin(pin: String) {
         context.dataStore.edit { it[pinKey] = pin }
     }
+
+    suspend fun updateTlsCaPem(pem: String) {
+        context.dataStore.edit { it[caKey] = pem }
+    }
 }
 
 data class SettingsState(
@@ -54,5 +60,6 @@ data class SettingsState(
     val port: Int,
     val compressionEnabled: Boolean,
     val tlsEnabled: Boolean,
-    val tlsPinSha256: String
+    val tlsPinSha256: String,
+    val tlsCaPem: String
 )

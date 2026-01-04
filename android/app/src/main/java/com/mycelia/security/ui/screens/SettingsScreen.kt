@@ -33,6 +33,7 @@ fun SettingsScreen(factory: MyceliaViewModelFactory, onBack: () -> Unit) {
     var host by remember(settings.host) { mutableStateOf(settings.host) }
     var port by remember(settings.port) { mutableStateOf(settings.port.toString()) }
     var tlsPin by remember(settings.tlsPinSha256) { mutableStateOf(settings.tlsPinSha256) }
+    var tlsCaPem by remember(settings.tlsCaPem) { mutableStateOf(settings.tlsCaPem) }
 
     Scaffold(
         topBar = {
@@ -83,6 +84,15 @@ fun SettingsScreen(factory: MyceliaViewModelFactory, onBack: () -> Unit) {
                         viewModel.updateTlsPin(it.trim())
                     },
                     label = { Text("TLS Pin (SHA-256, hex)") }
+                )
+                TextField(
+                    value = tlsCaPem,
+                    onValueChange = {
+                        tlsCaPem = it
+                        viewModel.updateTlsCaPem(it)
+                    },
+                    label = { Text("TLS CA PEM") },
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
         }
