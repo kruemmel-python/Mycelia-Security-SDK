@@ -1,119 +1,62 @@
-# Mycelia Security SDK – Whitepaper
+# Whitepaper
+
+# Mycelia Security: Hybrid Native Android Architecture
 
 ## Executive Summary
-Die Mycelia Security App bietet einen Ende‑zu‑Ende verschlüsselten Chat auf Android mit GPU‑beschleunigter Kryptografie über Vulkan. Die Lösung reduziert den Vertrauensumfang des Servers auf ein reines Relay und kombiniert deterministische Seed‑Modelle mit strikt kontrollierten Counter‑Offsets. Dadurch entsteht ein System, das für sicherheitskritische Kommunikation ausgelegt ist, ohne klassische Server‑Abhängigkeit für Vertraulichkeit.
+Mycelia ist eine Android‑basierte Kommunikationsplattform, die als PoC für eine dezentrale, hardwarenahe Sicherheitsarchitektur dient. Sie reduziert Server‑Trust durch Zero‑Knowledge‑Relay und verlagert kryptografische Workloads via Vulkan Compute in eine separate Ausführungsdomäne des Endgeräts.
 
-Relevanz:
-- Schutz sensibler Kommunikation in Unternehmen und kritischen Umgebungen
-- Minimiertes Risiko durch Zero‑Knowledge‑Server
-- Performancevorteile durch GPU‑Compute
+## 1. Problemstellung
 
-## Problemstellung
+### Vertrauensmodelle in der Kommunikation
+Klassische Messenger hängen von zentralen Servern (Identitäts‑/Key‑Directory) ab. Metadaten entstehen zwangsläufig. Mycelia verschiebt das Vertrauen vollständig auf die Endgeräte und behandelt das Netzwerk als untrusted Transport.
 
-### Schwächen klassischer Chat‑ und Security‑Lösungen
-- Zentralisierte Server sehen Metadaten und oft Schlüsselableitungen
-- Vertrauen in TLS‑Terminationspunkte
-- Komplexe Schlüsselverwaltung und Recovery‑Mechanismen
+### CPU‑Monopol und Angriffsflächen
+Krypto‑Operationen konkurrieren mit UI‑Threads und können bei kompromittierten OS‑Prozessen ausgelesen werden. GPU‑Offloading reduziert diese Angriffsfläche und erhöht Parallelität.
 
-### Risiken CPU‑basierter Kryptografie
-- Angriffsflächen durch Shared CPU‑Ressourcen
-- Timing‑Analysen und Memory‑Leak‑Risiken
-- Begrenzte Parallelität bei hoher Last
+## 2. Technologischer Ansatz
 
-### Schlüsselmanagement als Hauptproblem
-Die sichere, benutzerfreundliche Handhabung von Schlüsseln ist der Kern jeder Kommunikationssicherheit. Mycelia adressiert dies durch deterministische Seeds, klar definierte Counter‑Policy und minimalen Trust in Infrastruktur.
+### Native Kryptografie & Vulkan Compute
+- ChaCha20‑Keystream als GLSL‑Compute‑Shader
+- Execution‑Domain‑Separation (GPU vs. JVM‑Heap)
+- Hoher Durchsatz für Bulk‑Daten
 
-## Technologische Innovation
+### SubQG‑Entropie
+Deterministische Simulation dynamischer Felder (CPU‑SubQG) erzeugt komplexe Muster, die mit `SecureRandom` gemischt werden. Ziel ist eine zusätzliche Entropiequelle bei potenziell schwachem OS‑RNG.
 
-### GPU‑basierte Kryptografie
-Mycelia nutzt Vulkan‑Compute zur Erzeugung des Keystreams und zur Verarbeitung von Ciphertext. GPU‑Pipelines ermöglichen konsistente Performance und Isolierung gegenüber typischen CPU‑Angriffen.
+## 3. Architekturprinzipien
 
-### Deterministisches Chaos / Seed‑Modelle
-Die Sicherheit entsteht aus deterministischen Seeds, die lokal erzeugt, gespeichert und geteilt werden. Durch strikt monotone Counter‑Offsets wird Keystream‑Reuse verhindert.
+### Decentralized Trust
+- **Identität = Wissen:** Seed ist die Identität
+- **Server = Relay:** Kein Klartext, kein Key‑Material
 
-### Native Isolation
-Die Kryptografie läuft in nativen Komponenten (JNI ↔ C++ ↔ Vulkan), wodurch die Angriffsfläche der App‑Schicht reduziert wird.
+### Ephemere Sicherheit & PFS
+- X25519‑ECDH → HKDF → Session‑Keys
+- Seeds dienen zur Authentifizierung, nicht als alleiniger Session‑Key
 
-## Architektur & Designprinzipien
+## 4. Sicherheitsanalyse
 
-### Zero‑Knowledge
-Der Server verarbeitet ausschließlich Ciphertext. Er besitzt keine Schlüssel und kann keine Nachrichten entschlüsseln.
-
-### Minimaler Trust
-Nur die Endgeräte müssen vertrauenswürdig sein. Der Server bleibt ein Relay ohne Wissen über Inhalte.
-
-### Ephemeral Keys
-Der Ansatz erlaubt die Ableitung sitzungsbezogener Schlüssel und minimiert langfristige Schlüsselbindungen.
-
-### Keine Server‑Abhängigkeit für Sicherheit
-Die Verschlüsselung ist vollständig clientseitig. Serverlogik ist austauschbar.
-
-## Sicherheitsanalyse
-
-### Bedrohungsmodelle
-- Netzwerkangriffe (MITM)
-- Server‑Kompromittierung
-- Replay‑Angriffe
-- Key Extraction
-
-### Angriffsflächen
-- Endgerät (App, OS, Memory)
-- Netzwerkpfad
-- Server‑Relay
-
-### Warum klassische Angriffe scheitern
-- MITM: Ende‑zu‑Ende‑Verschlüsselung
-- Server‑Leak: Zero‑Knowledge‑Relay
+### Bedrohungsmodell
+- MITM: verhindert durch AEAD/HMAC
+- Server‑Kompromittierung: keine Schlüssel/Keystreams
 - Replay: Counter‑Policy
-- Key Extraction: lokale Speicherung ohne Server‑Sync
 
-## Vergleich mit bestehenden Lösungen
+### Grenzen
+- Metadaten sichtbar (IP/Timing)
+- Seeds lokal unverschlüsselt (PoC‑Status)
 
-### Klassische Messenger
-Diese benötigen oft serverseitige Identitätslogik, Recovery und Metadaten‑Handling. Mycelia reduziert dies auf das absolute Minimum.
+## 5. Vergleich mit bestehenden Lösungen
 
-### TLS‑basierte Systeme
-TLS schützt Transport, nicht Ende‑zu‑Ende. Mycelia schützt Inhalte unabhängig vom Transport.
+| Merkmal | Mycelia | Klassische Messenger | HSM‑basierte Systeme |
+|---|---|---|---|
+| Execution Domain | Hybrid CPU/GPU | CPU | Hardware‑isoliert |
+| Trust Anchor | Lokaler Seed | Server/Account | Hardware Key |
+| Server‑Wissen | Zero‑Knowledge | Metadaten/Graph | N/A |
 
-### Hardware‑Security‑Module (HSM)
-HSMs bieten Hardware‑Schlüssel, sind aber teuer und infrastrukturlastig. Mycelia setzt auf Endgeräte‑Kryptografie ohne zentrale HSM‑Abhängigkeit.
+## 6. Einsatzszenarien
+- Unternehmen & kritische Infrastruktur
+- Journalisten & Aktivisten
+- Temporäre Hochsicherheits‑Sessions
 
-## Einsatzszenarien
+## 7. Fazit & Ausblick
 
-- **Unternehmen**: vertrauliche Kommunikation zwischen Teams
-- **Journalisten**: Schutz von Quellen
-- **Aktivisten**: sichere Koordination
-- **KRITIS**: Kommunikation in sicherheitskritischen Infrastrukturen
-- **Private Kommunikation**: Schutz vor Datenabfluss
-
-## Grenzen & Verantwortung
-
-### Design‑Tradeoffs
-- Seed‑Sharing erfordert sicheren Kanal
-- Keine serverseitige Recovery
-- Sicherheit hängt von Gerät‑Integrität ab
-
-### Rechtliche Aspekte
-Je nach Einsatzland gelten regulatorische Anforderungen (z. B. Exportkontrollen, Datenschutz). Die App liefert die technische Basis, Compliance bleibt Aufgabe des Betreibers.
-
-### Verantwortung des Nutzers
-- Seeds sicher übertragen
-- Geräte schützen
-- Updates regelmäßig einspielen
-
-## Zukunftsausblick
-
-### Erweiterbarkeit
-- Ausbau der GPU‑Pipeline
-- Integration weiterer Plattformen (Desktop/iOS)
-- Erweiterte Schlüsselmechanismen und AAD‑Metadaten
-
-### Integration in andere Plattformen
-Die modulare Architektur erlaubt den Einsatz als SDK in anderen Anwendungen.
-
-### Langfristige Vision
-Mycelia ist als Sicherheits‑Backbone für ein dezentrales Kommunikations‑Ökosystem gedacht, in dem Endgeräte die volle kryptografische Hoheit behalten.
-
-## Fazit
-
-Mycelia liefert eine technisch belastbare, minimal‑trust‑basierte Lösung für sichere Kommunikation. Der Einsatz von GPU‑Compute, deterministischen Seeds und Zero‑Knowledge‑Servern schafft einen klaren Sicherheitsvorteil gegenüber klassischen Systemen. Die Architektur ist auf Enterprise‑Einsatz und externe Audits ausgelegt.
+Mycelia zeigt, dass Android‑Geräte als souveräne Krypto‑Prozessoren genutzt werden können. Für einen produktiven Einsatz sind Data‑at‑Rest‑Protection, Keystore‑Integration und TLS‑Hardening zwingend erforderlich. Perspektivisch kann Poly1305 vollständig auf GPU migriert werden, um echte GPU‑AEAD‑Pipelines zu ermöglichen.

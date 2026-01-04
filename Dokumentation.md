@@ -1,156 +1,129 @@
-# Mycelia Security SDK – Technische & Benutzer-Dokumentation
+# Dokumentation
 
-## 1. Einleitung
+## 1. Einleitung & Scope
 
-### Zweck der App
-Die Mycelia Security App ist ein Android‑basierter, Ende‑zu‑Ende verschlüsselter Chat‑Client, der GPU‑beschleunigte Kryptografie über den vorhandenen Vulkan‑Compute‑Pfad nutzt. Ziel ist eine sichere, performante Kommunikation auf realen Android‑Geräten (Android 10+), ohne dass der Server Zugriff auf Klartext oder Schlüssel erhält.
+### 1.1 Terminologie
+Um Missverständnisse zu vermeiden, werden folgende Begriffe konsistent verwendet:
+- **Mycelia App:** Die Android‑Applikation (UI, Datenhaltung, Business‑Logic).
+- **Mycelia Core (Native):** Die C++/Vulkan‑Bibliothek (`libmycelia_native.so`) für GPU‑beschleunigte Kryptografie.
+- **Relay‑Server:** Der Python‑TCP‑Server als reines Transport‑Relay ohne Klartextkenntnis.
+- **Seed:** 32‑Byte Geheimnis zur Identitäts‑/Sitzungsableitung.
+- **Session:** Ephemere Verbindung pro Chat, abgeleitet aus Seed und X25519‑Handshake.
 
-### Einordnung im Mycelia‑Ökosystem
-Die App ist ein Frontend für den bereits bestehenden Mycelia‑Krypto‑Stack im Repository. Sie nutzt die JNI‑Bridge, die native Vulkan‑Compute‑Engine sowie das serverseitige TCP‑Relay. Die App ist damit ein konkreter, produktionsnaher Einsatz des Mycelia‑Sicherheits‑SDKs.
+### 1.2 Status & Scope
+Diese Software ist **PoC/Referenzimplementierung** für den Mycelia‑Stack. Sie demonstriert den vollständigen End‑to‑End‑Pfad (Android → JNI → Vulkan → TCP‑Relay) und die praktischen Workflows (Invite/QR, Chat, Persistenz).
 
-### Abgrenzung zu klassischen Chat‑Apps
-Klassische Messenger basieren oft auf TLS‑gesicherten Transporten mit serverseitiger Sitzungslogik. Mycelia geht einen anderen Weg:
-- **Zero‑Knowledge‑Server**: Der Server sieht ausschließlich Ciphertext.
-- **GPU‑basierte Kryptografie**: Der Keystream wird über Vulkan erzeugt.
-- **Seed‑basierte Sitzungen**: Sicherheit wird über deterministische Seeds und streng kontrollierte Counter‑Offsets gewährleistet.
+**Implementiert:**
+- Ende‑zu‑Ende‑Verschlüsselung (AEAD ChaCha20‑Poly1305)
+- X25519‑Key‑Exchange und HKDF‑Ableitung
+- GPU‑Keystream (Vulkan) als Primitive
+- SubQG‑basierte Entropie‑Anreicherung (CPU‑Simulation)
+- TCP‑Framing + Reconnect‑Logik
 
-## 2. Systemübersicht
+**Nicht implementiert (für Produktion erforderlich):**
+- Verschlüsselung der lokalen Datenbank (Seeds liegen Base64‑kodiert im App‑Storage)
+- Certificate Pinning / TLS zum Relay‑Server
+- Hardware‑backed Keystore‑Integration
 
-### Architekturübersicht
-```
-Android App
-  └─ UI (Jetpack Compose)
-  └─ ViewModel/StateFlow
-  └─ Networking (TCP + Framing)
-  └─ Crypto Layer (JNI ↔ Vulkan Compute)
+**Hinweis:** Für produktiven Einsatz sind Hardening‑Maßnahmen notwendig (siehe Abschnitt 11).
 
-JNI Bridge (C++)
-  └─ MyceliaNative API
-  └─ MyceliaVulkanCompute
+### 1.3 Zweck der App
+Die App zeigt, wie moderne Kryptografie (ChaCha20‑Poly1305, X25519) ohne zentrale Auth‑Infrastruktur auf Android betrieben werden kann. Der Server ist bewusst „dumm“ und dient ausschließlich dem Transport.
 
-Server (Python asyncio)
-  └─ TCP Relay
-  └─ Rooms via roomId (Invite Code)
-```
+## 2. Projekt‑ & Architekturübersicht
 
-### Kommunikationsmodell
-- TCP‑Verbindung zwischen App und Server
-- Länge‑präfixiertes Framing (u32 Big‑Endian)
-- JSON‑Payload mit `roomId`, `type`, `bodyCipherBase64`, `counter` und optionalen Hello‑Frames
+### Modulstruktur
+Das Projekt ist monolithisch (`com.android.application`), aber logisch geschichtet:
+1. **UI‑Layer (Kotlin/Compose):** MVVM‑Pattern, StateFlow‑basierte Zustände.
+2. **Domain/Data‑Layer:** `ChatRepository` als Datenzugriff, `TcpChatClient` für Networking.
+3. **Crypto‑Layer:**
+   - **High‑Level:** `CryptoEngine` als Fassade
+   - **CPU‑Pfad:** AEAD via BouncyCastle
+   - **Native‑Pfad:** Vulkan‑Compute für Keystream‑XOR
 
-### Sicherheitsmodell
-- End‑to‑Ende‑Verschlüsselung
-- Server ist ein reines Relay
-- Schlüsselmaterial verbleibt auf den Geräten
-- Counter‑basierter Keystream schützt gegen Re‑Use
+### Datenfluss
+1. **Input:** Nutzer‑Eingabe oder QR‑Scan.
+2. **Krypto:**
+   - Seed‑basierter Auth‑Handshake (HMAC)
+   - X25519‑ECDH → HKDF → Session‑Key
+   - AEAD‑Verschlüsselung für Nachrichten
+3. **Transport:** JSON‑Payloads über TCP mit Length‑Prefix‑Framing.
+4. **Storage:** Room‑DB (SQLite) für Verlauf/Counter.
 
-## 3. Technische Architektur
+## 3. Android‑Architektur
 
-### Android‑Layer
-- **UI**: Jetpack Compose Screens (Conversations, Chat, Settings, Invite/QR)
-- **ViewModel**: StateFlow für UI‑State, Verbindung und Nachrichten
-- **Networking**: TCP‑Client mit Reconnect‑Strategie und Framing
-- **Persistence**: Room DB für Conversations und Messages
+### Threading & Concurrency
+- **UI:** Main‑Thread (Compose)
+- **I/O:** `Dispatchers.IO` für DB + Sockets
+- **Compute:** `Dispatchers.Default` für SubQG‑Simulation
+- **Lifecycle:** `TcpChatClient` wird über `viewModelScope` verwaltet
+
+## 4. Native Integration (JNI & Vulkan)
 
 ### JNI‑Bridge
-Die JNI‑Bridge kapselt den Zugriff auf die native Vulkan‑Compute‑Bibliothek:
-- `nativeInit(shaderDir)`
-- `nativeEncrypt(handle, input, seed, streamOffset)`
-- `nativeDecrypt(handle, input, seed, streamOffset)`
+- Datei: `android/app/src/main/cpp/mycelia_jni.cpp`
+- Übergabe: `jbyteArray` → `std::vector<uint8_t>` → `VkBuffer`
+- Ressourcenkontrolle über `nativeRelease()`
 
-### Native Crypto Engine (GPU / Vulkan)
-- Vulkan‑Compute Pipeline
-- Shader‑basierte Keystream‑Generierung
-- XOR‑Operationen auf GPU
+### Vulkan Compute Engine
+- Shader: `mycelia_keystream_xor.comp`
+- Implementiert ChaCha20‑Blockfunktion (RFC‑kompatible Konstanten und Rounds)
+- Erzeugt Keystream + XOR mit Input‑Buffer
+- **Kein Poly1305 im Shader** → AEAD erfolgt aktuell im CPU‑Pfad
 
-### Speicher‑ & Schlüsselhandling
-- Seed wird lokal persistiert (Room)
-- Session‑Counter wird persistiert
-- Kein Logging sensibler Daten
-- GPU‑Buffer werden nur für die Verarbeitung verwendet
+## 5. Kryptografisches Konzept
 
-## 4. Kryptografisches Design
+### Primitiven
+- **AEAD:** ChaCha20‑Poly1305 (BouncyCastle)
+- **Stream‑Primitive:** ChaCha20 Keystream (Vulkan)
+- **Key Exchange:** X25519
+- **KDF:** HKDF‑SHA256
 
-### Seed‑basierte Schlüsselableitung
-- Jeder Chat besitzt eine Session‑Seed
-- Seed wird als Base64 gespeichert und geteilt
-- Seed + Counter → deterministische Keystream‑Offsets
+### Identität & Session
+- **Seed:** 32‑Byte PSK als Auth‑Anker
+- **Handshake:** HMAC über Public‑Key (Hello‑Frame)
+- **Session‑Key:** ECDH‑Secret + Seed → HKDF
 
-### Counter‑ & Session‑Management
-- Pro Chat ein monotoner `messageCounter`
-- `stream_offset = counter * STRIDE + byteOffset`
-- STRIDE ist fix, um Keystream‑Reuse auszuschließen
+## 6. Netzwerkprotokoll
 
-### Warum GPU‑basierte Kryptografie
-- Hohe Parallelität
-- Stabile Performance bei großen Datenmengen
-- Nutzung vorhandener Vulkan‑Compute‑Pipeline
-
-### Unterschiede zu AES/RSA/Klassikern
-- Kein klassisches Block‑Cipher‑Schema
-- Stream‑Cipher‑Ansatz mit deterministischem Keystream
-- Key/Seed‑Management strikt lokal
-
-## 5. Netzwerkprotokoll
-
-### TCP‑Kommunikation
-- Permanente TCP‑Verbindung
+### Transport
+- TCP‑Socket, `TCP_NODELAY`
 - Reconnect mit Backoff
-- Fehlerzustände werden sichtbar angezeigt
 
-### Framing‑Strategie
-- 4‑Byte Längenpräfix (u32 Big‑Endian)
-- Payload als JSON
+### Framing
+- 4‑Byte Length‑Prefix (u32 Big‑Endian)
+
+### Payload‑Typen (JSON)
+- **join**: Raumbeitritt (roomId)
+- **hello**: Authentifizierter Public‑Key‑Austausch
+- **message**: `bodyCipherBase64`, `counter`
 
 ### Replay‑Schutz
-- Counter‑Management verhindert doppelte/alte Nachrichten
+- Monotoner Counter pro Chat
 - Nachrichten mit `counter <= lastCounter` werden verworfen
 
-### Fehlerbehandlung
-- Verbindungsabbrüche → Reconnect
-- Falsche Längen → Abbruch
-- Auth‑Fehler → Nachricht verworfen
+## 7. Sicherheitsmodell
 
-## 6. Sicherheitskonzept
+### Annahmen
+- Seed wird out‑of‑band sicher übertragen (QR/Invite)
+- Endgerät ist nicht kompromittiert
 
-### Zero‑Knowledge‑Ansatz
-- Server sieht nur verschlüsselte Payloads
-- Keine Klartext‑Verarbeitung
-- Keine Schlüsselhaltung auf Serverseite
+### Grenzen
+- Server sieht Metadaten (IP/Timing/Größe)
+- Seeds liegen unverschlüsselt im App‑Storage
 
-### Keine persistente Schlüsselhaltung
-- Seeds werden lokal gespeichert
-- Keine Weitergabe an den Server
+## 8. App‑Benutzung
 
-### Schutz vor Angriffsvektoren
-- **Memory Dumps**: Schlüssel nicht geloggt, nur lokal
-- **MITM**: Ende‑zu‑Ende‑Verschlüsselung
-- **Replay**: Counter‑Prüfung
-- **Key Extraction**: Keine Schlüssel im Server
-
-## 7. App‑Bedienung
-
-### Installation
-- APK via Android Studio bauen
-- Debug/Release möglich
-
-### Erster Start
-- Conversations‑Liste
-- Neuer Chat erzeugt lokalen Seed
-
-### Verbindung herstellen
-- Server Host/Port in Settings setzen
-- Port muss im Netzwerk erreichbar sein
-
-### Nachrichten senden/empfangen
-- Nachrichten werden verschlüsselt versendet
-- Empfangene Nachrichten werden entschlüsselt angezeigt
+1. **Server konfigurieren** (Host/Port)
+2. **Chat erstellen oder beitreten**
+3. **Invite/QR teilen**
+4. **Nachrichten senden/empfangen**
 
 ### Typische Fehlermeldungen
-- **Connection failed**: Host/Port nicht erreichbar
-- **Schlüsselaustausch ausstehend**: Gegenstelle nicht verbunden
+- **Connection failed:** Host/Port nicht erreichbar
+- **Schlüsselaustausch ausstehend:** Gegenstelle nicht verbunden / alte App‑Version
 
-## 8. Build & Deployment
+## 9. Build & Deployment
 
 ### Voraussetzungen
 - Android Studio
@@ -162,36 +135,20 @@ Die JNI‑Bridge kapselt den Zugriff auf die native Vulkan‑Compute‑Bibliothe
 ./gradlew :app:assembleDebug
 ```
 
-### Native Bibliotheken
-- `libmycelia_native.so` via CMake
+### Shader‑Kompilierung
+```bash
+./gradlew :app:compileMyceliaShaders
+```
 
-### Debug vs. Release
-- Debug: Logging aktiv
-- Release: ProGuard optional
+## 10. Troubleshooting
 
-## 9. Fehlerdiagnose & Troubleshooting
+- **Vulkan‑Fehler:** Emulator muss GPU‑Pass‑Through unterstützen
+- **AEAD‑Fehler:** Counter‑Desync oder falscher Seed
+- **Key‑Exchange hängt:** Beide Geräte müssen aktuelle App‑Version nutzen
 
-### Typische Build‑Fehler
-- Shader‑Compile: glslc‑Version prüfen
-- NDK‑Pfad fehlt: Android Studio SDK Manager
+## 11. Sicherheitshinweise (Hardening)
 
-### Laufzeitfehler
-- Crash beim Start: Room‑Migration (DB löschen)
-- Keine Nachrichten: Key‑Exchange/Invite prüfen
-
-### Netzwerkprobleme
-- Firewall blockiert Port
-- Gerät nicht im selben WLAN
-
-## 10. Sicherheitshinweise & Best Practices
-
-- Nutzung in separatem Testnetz vor Produktion
-- Seed‑Transfer nur über vertrauenswürdige Kanäle
-- Keine Debug‑Builds in produktiven Umgebungen
-- Regelmäßige Sicherheitsreviews
-
-## 11. Lizenz & Haftungsausschluss
-
-Dieses Projekt kann sowohl Open‑Source‑ als auch proprietär betrieben werden. Alle sicherheitsrelevanten Aussagen gelten unter der Prämisse korrekter Implementierung und sicherer Betriebsumgebung.
-
-Haftungsausschluss: Die Nutzung erfolgt auf eigenes Risiko. Es wird keine Garantie für Fehlerfreiheit oder Eignung für spezifische Einsatzzwecke übernommen.
+1. **DB‑Verschlüsselung:** SQLCipher oder EncryptedRoom
+2. **Keystore:** Seed verschlüsselt im Android‑Keystore speichern
+3. **TLS + Pinning:** Transportmetadaten schützen
+4. **Shader‑KATs:** Known‑Answer‑Tests bei App‑Start
