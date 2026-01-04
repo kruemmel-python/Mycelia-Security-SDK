@@ -1,0 +1,144 @@
+{
+  "cases": [
+    {
+      "seed": 0,
+      "stream_offset": 0,
+      "plaintext_hex": "",
+      "gpu_index": 0,
+      "size": 0
+    },
+    {
+      "seed": 1,
+      "stream_offset": 1,
+      "plaintext_hex": "01",
+      "gpu_index": 0,
+      "size": 1
+    },
+    {
+      "seed": 2,
+      "stream_offset": 2,
+      "plaintext_hex": "0203",
+      "gpu_index": 0,
+      "size": 2
+    },
+    {
+      "seed": 3,
+      "stream_offset": 3,
+      "plaintext_hex": "030405",
+      "gpu_index": 0,
+      "size": 3
+    },
+    {
+      "seed": 4,
+      "stream_offset": 4,
+      "plaintext_hex": "04050607",
+      "gpu_index": 0,
+      "size": 4
+    },
+    {
+      "seed": 5,
+      "stream_offset": 5,
+      "plaintext_hex": "05060708090a0b",
+      "gpu_index": 0,
+      "size": 7
+    },
+    {
+      "seed": 6,
+      "stream_offset": 6,
+      "plaintext_hex": "060708090a0b0c0d0e0f1011121314",
+      "gpu_index": 0,
+      "size": 15
+    },
+    {
+      "seed": 7,
+      "stream_offset": 7,
+      "plaintext_hex": "0708090a0b0c0d0e0f10111213141516",
+      "gpu_index": 0,
+      "size": 16
+    },
+    {
+      "seed": 8,
+      "stream_offset": 8,
+      "plaintext_hex": "08090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20212223242526",
+      "gpu_index": 0,
+      "size": 31
+    },
+    {
+      "seed": 9,
+      "stream_offset": 9,
+      "plaintext_hex": "090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728",
+      "gpu_index": 0,
+      "size": 32
+    },
+    {
+      "seed": 10,
+      "stream_offset": 16,
+      "plaintext_hex": "0a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708",
+      "gpu_index": 0,
+      "size": 255
+    },
+    {
+      "seed": 11,
+      "stream_offset": 32,
+      "plaintext_hex": "0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a",
+      "gpu_index": 0,
+      "size": 256
+    },
+    {
+      "seed": 123456789,
+      "stream_offset": 64,
+      "plaintext_hex": "0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff000102030405060708090a0b",
+      "gpu_index": 0,
+      "size": 1024
+    },
+    {
+      "seed": 987654321,
+      "stream_offset": 128,
+      "plaintext_hex": "0d0e0f1011",
+      "gpu_index": 0,
+      "size": 5
+    },
+    {
+      "seed": 42,
+      "stream_offset": 256,
+      "plaintext_hex": "0e0f10111213",
+      "gpu_index": 0,
+      "size": 6
+    },
+    {
+      "seed": 1337,
+      "stream_offset": 512,
+      "plaintext_hex": "0f10111213141516",
+      "gpu_index": 0,
+      "size": 8
+    },
+    {
+      "seed": 18446744073709551615,
+      "stream_offset": 1024,
+      "plaintext_hex": "101112131415161718",
+      "gpu_index": 0,
+      "size": 9
+    },
+    {
+      "seed": 1311768467294899695,
+      "stream_offset": 2048,
+      "plaintext_hex": "1112131415161718191a",
+      "gpu_index": 0,
+      "size": 10
+    },
+    {
+      "seed": 1084818905618843912,
+      "stream_offset": 4096,
+      "plaintext_hex": "12131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f5051",
+      "gpu_index": 0,
+      "size": 64
+    },
+    {
+      "seed": 1234605616436508552,
+      "stream_offset": 8192,
+      "plaintext_hex": "131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192",
+      "gpu_index": 0,
+      "size": 128
+    }
+  ]
+}
