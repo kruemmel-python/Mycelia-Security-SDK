@@ -1,0 +1,2195 @@
+diff --git a/android/README.md b/android/README.md
+index f0ccc8b..c3f31b4 100644
+--- a/android/README.md
++++ b/android/README.md
+@@ -1,37 +1,52 @@
+-# Mycelia Android (Vulkan Compute)
++# Mycelia Android Chat (Vulkan Compute)
+ 
+-Dieses Verzeichnis enthält das Android/NDK‑Gerüst für den Mycelia‑Treiber (GPU‑Kern via Vulkan Compute) und den Chat/Vault‑Client.
++Dieses Verzeichnis enthält eine vollständige Android-Chat-App (Jetpack Compose) mit dem Mycelia Vulkan-Compute JNI-Pfad.
+ 
+ ## Überblick
+ 
+-- **NDK/JNI**: Native Bibliothek für Verschlüsselung/Entschlüsselung.
+-- **Vulkan Compute**: 1:1 Port der OpenCL‑Keystream‑Logik (SubQG Simulation + Convert‑to‑Bytes + XOR).
+-- **MCP/Zlib**: 1:1 Protokoll‑ und Kompressionskompatibilität wie in `python/mycelia_chat.py`.
++- **NDK/JNI**: `libmycelia_native.so` mit `com.mycelia.security.MyceliaNative`
++- **Vulkan Compute**: GPU-Keystream XOR (SPIR-V Shader)
++- **Protokoll**: TCP + Length-Prefix Framing + JSON Payload
++- **Kompression**: Optional zlib (Feature-Flag in den Einstellungen)
++- **Persistenz**: Room DB (`conversations`, `messages`)
++- **Seed-Sharing**: Invite Code (Base64 Seed) + QR
+ 
+-## Shader (SPIR-V) Build – Einzeiler
++## Shader (SPIR-V)
++
++Die App lädt `mycelia_keystream_xor.spv` zur Runtime aus `app/src/main/assets/shaders/`.
++Die Datei ist bereits im Repo vorhanden.
++
++## Build & Run (Android Studio)
++
++1. `android/` als Projekt öffnen.
++2. NDK + CMake installieren.
++3. Sync/Build ausführen.
++4. App starten.
++
++## Server starten
+ 
+ ```bash
+-glslangValidator -V android/app/src/main/shaders/subqg_init.comp -o android/app/src/main/shaders/subqg_init.spv && glslangValidator -V android/app/src/main/shaders/subqg_simulation.comp -o android/app/src/main/shaders/subqg_simulation.spv && glslangValidator -V android/app/src/main/shaders/mycelia_keystream_xor.comp -o android/app/src/main/shaders/mycelia_keystream_xor.spv
++python3 tools/server/mycelia_chat_server.py
+ ```
+ 
+-## Build (NDK)
++Standard-Port: `8989`.
+ 
+-In Android Studio:
++## App konfigurieren
+ 
+-1. `android/` als Projekt öffnen.
+-2. NDK und CMake installieren.
+-3. Build ausführen. Es wird eine native Bibliothek `libmycelia_native.so` erzeugt.
++In **Einstellungen**:
++- **Server Host**: z. B. `10.0.2.2` (Android Emulator) oder die LAN-IP des Hosts.
++- **Server Port**: `8989`.
++- **Kompression**: Muss auf beiden Clients gleich gesetzt sein.
+ 
+-## Hinweise
++## Invite / QR Workflow
+ 
+-- Der Vulkan‑Compute‑Pfad benötigt die SPIR‑V Dateien neben den GLSL‑Shadern.
+-- Für 1:1 Kompatibilität muss der `subqg_simulation`‑Shader bytegenau dem OpenCL‑Kern entsprechen.
+-- Der JNI‑Aufruf erwartet einen Shader‑Pfad (z. B. App‑internes Files‑Dir mit den SPIR‑V Dateien).
++1. Neue Unterhaltung erstellen (Seed wird generiert).
++2. Invite Screen öffnen und Base64 Seed oder QR-Code teilen.
++3. Gegenstelle scannt QR oder fügt Invite Code ein.
+ 
+-## Dateien
++## Troubleshooting
+ 
+-- `app/src/main/cpp/mycelia_vulkan_compute.*`: Vulkan Compute Pipeline + Buffer‑Handling.
+-- `app/src/main/cpp/mycelia_jni.cpp`: JNI‑Bridge für Java/Kotlin.
+-- `app/src/main/shaders/subqg_init.comp`: Init‑Kernel (entspricht OpenCL‑Buffer‑Init).
+-- `app/src/main/shaders/subqg_simulation.comp`: SubQG Simulation (1:1 Port).
+-- `app/src/main/shaders/mycelia_keystream_xor.comp`: Keystream‑Hash + XOR.
++- **Firewall**: Port `8989` freigeben.
++- **Emulator**: `10.0.2.2` für Host-Loopback nutzen.
++- **Reales Gerät**: Gerät und Server im gleichen WLAN, Host-IP eintragen.
++- **Vulkan/Shader**: Prüfen, ob `mycelia_keystream_xor.spv` in Assets vorhanden ist.
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+new file mode 100644
+index 0000000..0f16332
+--- /dev/null
++++ b/android/app/build.gradle.kts
+@@ -0,0 +1,98 @@
++plugins {
++    id("com.android.application")
++    id("org.jetbrains.kotlin.android")
++    id("org.jetbrains.kotlin.kapt")
++}
++
++android {
++    namespace = "com.mycelia.security"
++    compileSdk = 34
++
++    defaultConfig {
++        applicationId = "com.mycelia.security"
++        minSdk = 26
++        targetSdk = 34
++        versionCode = 1
++        versionName = "1.0"
++
++        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
++
++        externalNativeBuild {
++            cmake {
++                cppFlags += "-std=c++17"
++            }
++        }
++        ndk {
++            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
++        }
++    }
++
++    buildTypes {
++        release {
++            isMinifyEnabled = false
++            proguardFiles(
++                getDefaultProguardFile("proguard-android-optimize.txt"),
++                "proguard-rules.pro"
++            )
++        }
++    }
++
++    buildFeatures {
++        compose = true
++    }
++
++    composeOptions {
++        kotlinCompilerExtensionVersion = "1.5.14"
++    }
++
++    compileOptions {
++        sourceCompatibility = JavaVersion.VERSION_17
++        targetCompatibility = JavaVersion.VERSION_17
++    }
++
++    kotlinOptions {
++        jvmTarget = "17"
++    }
++
++    externalNativeBuild {
++        cmake {
++            path = file("src/main/cpp/CMakeLists.txt")
++            version = "3.22.1"
++        }
++    }
++
++    packaging {
++        resources {
++            excludes += "/META-INF/{AL2.0,LGPL2.1}"
++        }
++    }
++}
++
++dependencies {
++    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
++    implementation(composeBom)
++    androidTestImplementation(composeBom)
++
++    implementation("androidx.core:core-ktx:1.13.1")
++    implementation("androidx.activity:activity-compose:1.9.0")
++    implementation("androidx.compose.ui:ui")
++    implementation("androidx.compose.ui:ui-tooling-preview")
++    implementation("androidx.compose.material3:material3")
++    implementation("androidx.navigation:navigation-compose:2.7.7")
++
++    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
++    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
++
++    implementation("androidx.room:room-runtime:2.6.1")
++    implementation("androidx.room:room-ktx:2.6.1")
++    kapt("androidx.room:room-compiler:2.6.1")
++
++    implementation("androidx.datastore:datastore-preferences:1.1.1")
++    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
++
++    implementation("com.google.zxing:core:3.5.3")
++    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
++
++    testImplementation("junit:junit:4.13.2")
++    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
++}
+diff --git a/android/app/proguard-rules.pro b/android/app/proguard-rules.pro
+new file mode 100644
+index 0000000..fb164d6
+--- /dev/null
++++ b/android/app/proguard-rules.pro
+@@ -0,0 +1 @@
++# Add project specific ProGuard rules here.
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+new file mode 100644
+index 0000000..918ad9a
+--- /dev/null
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -0,0 +1,21 @@
++<manifest xmlns:android="http://schemas.android.com/apk/res/android">
++    <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.CAMERA" />
++
++    <application
++        android:name=".MyceliaApp"
++        android:allowBackup="true"
++        android:icon="@android:drawable/sym_def_app_icon"
++        android:label="Mycelia Chat"
++        android:supportsRtl="true"
++        android:theme="@style/Theme.Mycelia">
++        <activity
++            android:name=".MainActivity"
++            android:exported="true">
++            <intent-filter>
++                <action android:name="android.intent.action.MAIN" />
++                <category android:name="android.intent.category.LAUNCHER" />
++            </intent-filter>
++        </activity>
++    </application>
++</manifest>
+diff --git a/android/app/src/main/assets/shaders/mycelia_keystream_xor.spv b/android/app/src/main/assets/shaders/mycelia_keystream_xor.spv
+new file mode 100644
+index 0000000000000000000000000000000000000000..07e9ea8b07350aa3b64e535368c69fac0d1fda18
+GIT binary patch
+literal 12008
+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
+U>rqcXV_@|b#ed6^`)^tQ1GQq1qyPW_
+
+literal 0
+HcmV?d00001
+
+diff --git a/android/app/src/main/java/com/mycelia/security/MainActivity.kt b/android/app/src/main/java/com/mycelia/security/MainActivity.kt
+new file mode 100644
+index 0000000..39e7c95
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/MainActivity.kt
+@@ -0,0 +1,87 @@
++package com.mycelia.security
++
++import android.os.Bundle
++import androidx.activity.ComponentActivity
++import androidx.activity.compose.setContent
++import androidx.compose.foundation.isSystemInDarkTheme
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.remember
++import androidx.compose.ui.platform.LocalContext
++import androidx.navigation.NavType
++import androidx.navigation.compose.NavHost
++import androidx.navigation.compose.composable
++import androidx.navigation.compose.rememberNavController
++import androidx.navigation.navArgument
++import com.mycelia.security.ui.screens.ChatScreen
++import com.mycelia.security.ui.screens.ConversationsScreen
++import com.mycelia.security.ui.screens.InviteScreen
++import com.mycelia.security.ui.screens.SettingsScreen
++import com.mycelia.security.ui.theme.MyceliaTheme
++
++class MainActivity : ComponentActivity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        setContent {
++            MyceliaAppRoot()
++        }
++    }
++}
++
++@Composable
++private fun MyceliaAppRoot() {
++    val navController = rememberNavController()
++    val context = LocalContext.current
++    val app = remember { context.applicationContext as MyceliaApp }
++    val factory = remember { MyceliaViewModelFactory(app) }
++
++    MyceliaTheme(darkTheme = isSystemInDarkTheme()) {
++        NavHost(navController = navController, startDestination = "conversations") {
++            composable("conversations") {
++                ConversationsScreen(
++                    factory = factory,
++                    onOpenConversation = { id -> navController.navigate("chat/$id") },
++                    onOpenSettings = { navController.navigate("settings") },
++                    onScanInvite = { navController.navigate("invite") }
++                )
++            }
++            composable(
++                "chat/{conversationId}",
++                arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
++            ) {
++                ChatScreen(
++                    factory = factory,
++                    onBack = { navController.popBackStack() },
++                    onInvite = { id -> navController.navigate("invite/$id") }
++                )
++            }
++            composable("settings") {
++                SettingsScreen(factory = factory, onBack = { navController.popBackStack() })
++            }
++            composable(
++                "invite/{conversationId}",
++                arguments = listOf(navArgument("conversationId") { type = NavType.StringType })
++            ) {
++                InviteScreen(
++                    factory = factory,
++                    onBack = { navController.popBackStack() },
++                    onJoinConversation = { id ->
++                        navController.navigate("chat/$id") {
++                            popUpTo("conversations") { inclusive = false }
++                        }
++                    }
++                )
++            }
++            composable("invite") {
++                InviteScreen(
++                    factory = factory,
++                    onBack = { navController.popBackStack() },
++                    onJoinConversation = { id ->
++                        navController.navigate("chat/$id") {
++                            popUpTo("conversations") { inclusive = false }
++                        }
++                    }
++                )
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/MyceliaApp.kt b/android/app/src/main/java/com/mycelia/security/MyceliaApp.kt
+new file mode 100644
+index 0000000..d8511e9
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/MyceliaApp.kt
+@@ -0,0 +1,16 @@
++package com.mycelia.security
++
++import android.app.Application
++import com.mycelia.security.crypto.CryptoEngine
++import com.mycelia.security.data.AppDatabase
++import com.mycelia.security.data.ChatRepository
++import com.mycelia.security.settings.SettingsRepository
++
++class MyceliaApp : Application() {
++    val database: AppDatabase by lazy { AppDatabase.get(this) }
++    val chatRepository: ChatRepository by lazy {
++        ChatRepository(database.conversationDao(), database.messageDao())
++    }
++    val settingsRepository: SettingsRepository by lazy { SettingsRepository(this) }
++    val cryptoEngine: CryptoEngine by lazy { CryptoEngine(this) }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/MyceliaViewModelFactory.kt b/android/app/src/main/java/com/mycelia/security/MyceliaViewModelFactory.kt
+new file mode 100644
+index 0000000..d6d5323
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/MyceliaViewModelFactory.kt
+@@ -0,0 +1,36 @@
++package com.mycelia.security
++
++import androidx.lifecycle.SavedStateHandle
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.ViewModelProvider
++import androidx.lifecycle.createSavedStateHandle
++import com.mycelia.security.ui.ConversationsViewModel
++import com.mycelia.security.ui.ChatViewModel
++import com.mycelia.security.ui.InviteViewModel
++import com.mycelia.security.ui.SettingsViewModel
++
++class MyceliaViewModelFactory(private val app: MyceliaApp) : ViewModelProvider.Factory {
++    override fun <T : ViewModel> create(modelClass: Class<T>, extras: ViewModelProvider.Factory.CreationExtras): T {
++        val savedStateHandle = extras.createSavedStateHandle()
++        return when {
++            modelClass.isAssignableFrom(ConversationsViewModel::class.java) -> {
++                ConversationsViewModel(app.chatRepository)
++            }
++            modelClass.isAssignableFrom(ChatViewModel::class.java) -> {
++                ChatViewModel(
++                    app.chatRepository,
++                    app.cryptoEngine,
++                    app.settingsRepository,
++                    savedStateHandle
++                )
++            }
++            modelClass.isAssignableFrom(SettingsViewModel::class.java) -> {
++                SettingsViewModel(app.settingsRepository)
++            }
++            modelClass.isAssignableFrom(InviteViewModel::class.java) -> {
++                InviteViewModel(app.chatRepository, savedStateHandle)
++            }
++            else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
++        } as T
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/crypto/CounterManager.kt b/android/app/src/main/java/com/mycelia/security/crypto/CounterManager.kt
+new file mode 100644
+index 0000000..29ea2c4
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/crypto/CounterManager.kt
+@@ -0,0 +1,11 @@
++package com.mycelia.security.crypto
++
++object CounterManager {
++    const val STRIDE_BYTES = 4096L
++
++    fun streamOffset(counter: Long, byteOffset: Long = 0): Long {
++        require(counter >= 0) { "Counter must be non-negative" }
++        require(byteOffset >= 0) { "Byte offset must be non-negative" }
++        return counter * STRIDE_BYTES + byteOffset
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/crypto/CryptoEngine.kt b/android/app/src/main/java/com/mycelia/security/crypto/CryptoEngine.kt
+new file mode 100644
+index 0000000..a274a6f
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/crypto/CryptoEngine.kt
+@@ -0,0 +1,50 @@
++package com.mycelia.security.crypto
++
++import android.content.Context
++import java.io.File
++import java.io.FileOutputStream
++
++class CryptoEngine(private val context: Context) {
++    private val native = MyceliaNative()
++    private val handle: Long
++
++    init {
++        val shaderDir = ShaderAssetManager.ensureShaders(context)
++        handle = native.nativeInit(shaderDir)
++        require(handle != 0L) { "Failed to initialize native crypto engine" }
++    }
++
++    fun encrypt(input: ByteArray, seed: ByteArray, streamOffset: Long): ByteArray {
++        return native.nativeEncrypt(handle, input, seed, streamOffset)
++            ?: error("Native encrypt returned null")
++    }
++
++    fun decrypt(input: ByteArray, seed: ByteArray, streamOffset: Long): ByteArray {
++        return native.nativeDecrypt(handle, input, seed, streamOffset)
++            ?: error("Native decrypt returned null")
++    }
++
++    fun shutdown() {
++        native.nativeRelease(handle)
++    }
++}
++
++object ShaderAssetManager {
++    private const val SHADER_FILE = "mycelia_keystream_xor.spv"
++
++    fun ensureShaders(context: Context): String {
++        val dir = File(context.filesDir, "shaders")
++        if (!dir.exists()) {
++            dir.mkdirs()
++        }
++        val outputFile = File(dir, SHADER_FILE)
++        if (!outputFile.exists()) {
++            context.assets.open("shaders/$SHADER_FILE").use { input ->
++                FileOutputStream(outputFile).use { output ->
++                    input.copyTo(output)
++                }
++            }
++        }
++        return dir.absolutePath
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/crypto/MyceliaNative.kt b/android/app/src/main/java/com/mycelia/security/crypto/MyceliaNative.kt
+new file mode 100644
+index 0000000..48c930a
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/crypto/MyceliaNative.kt
+@@ -0,0 +1,14 @@
++package com.mycelia.security.crypto
++
++class MyceliaNative {
++    external fun nativeInit(shaderDir: String): Long
++    external fun nativeRelease(handle: Long)
++    external fun nativeEncrypt(handle: Long, input: ByteArray, seed: ByteArray, streamOffset: Long): ByteArray?
++    external fun nativeDecrypt(handle: Long, input: ByteArray, seed: ByteArray, streamOffset: Long): ByteArray?
++
++    companion object {
++        init {
++            System.loadLibrary("mycelia_native")
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/crypto/SeedManager.kt b/android/app/src/main/java/com/mycelia/security/crypto/SeedManager.kt
+new file mode 100644
+index 0000000..f9fdfa8
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/crypto/SeedManager.kt
+@@ -0,0 +1,20 @@
++package com.mycelia.security.crypto
++
++import android.util.Base64
++import java.security.SecureRandom
++
++object SeedManager {
++    private val random = SecureRandom()
++
++    fun generateSeed(size: Int = 32): ByteArray {
++        return ByteArray(size).also { random.nextBytes(it) }
++    }
++
++    fun encodeSeed(seed: ByteArray): String {
++        return Base64.encodeToString(seed, Base64.NO_WRAP)
++    }
++
++    fun decodeSeed(seedB64: String): ByteArray {
++        return Base64.decode(seedB64, Base64.NO_WRAP)
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/data/AppDatabase.kt b/android/app/src/main/java/com/mycelia/security/data/AppDatabase.kt
+new file mode 100644
+index 0000000..09632fe
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/data/AppDatabase.kt
+@@ -0,0 +1,33 @@
++package com.mycelia.security.data
++
++import android.content.Context
++import androidx.room.Database
++import androidx.room.Room
++import androidx.room.RoomDatabase
++
++@Database(
++    entities = [ConversationEntity::class, MessageEntity::class],
++    version = 1,
++    exportSchema = false
++)
++abstract class AppDatabase : RoomDatabase() {
++    abstract fun conversationDao(): ConversationDao
++    abstract fun messageDao(): MessageDao
++
++    companion object {
++        @Volatile
++        private var INSTANCE: AppDatabase? = null
++
++        fun get(context: Context): AppDatabase {
++            return INSTANCE ?: synchronized(this) {
++                val instance = Room.databaseBuilder(
++                    context.applicationContext,
++                    AppDatabase::class.java,
++                    "mycelia.db"
++                ).build()
++                INSTANCE = instance
++                instance
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/data/ChatRepository.kt b/android/app/src/main/java/com/mycelia/security/data/ChatRepository.kt
+new file mode 100644
+index 0000000..3e86952
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/data/ChatRepository.kt
+@@ -0,0 +1,47 @@
++package com.mycelia.security.data
++
++import kotlinx.coroutines.flow.Flow
++import java.util.UUID
++
++class ChatRepository(
++    private val conversationDao: ConversationDao,
++    private val messageDao: MessageDao
++) {
++    fun observeConversations(): Flow<List<ConversationEntity>> = conversationDao.observeAll()
++
++    fun observeConversation(id: String): Flow<ConversationEntity?> = conversationDao.observeById(id)
++
++    fun observeMessages(conversationId: String): Flow<List<MessageEntity>> =
++        messageDao.observeByConversation(conversationId)
++
++    suspend fun createConversation(name: String, seedB64: String): String {
++        val id = UUID.randomUUID().toString()
++        val conversation = ConversationEntity(
++            id = id,
++            name = name,
++            createdAt = System.currentTimeMillis(),
++            seedB64 = seedB64,
++            lastCounter = 0L,
++            lastMessagePreview = null
++        )
++        conversationDao.insert(conversation)
++        return id
++    }
++
++    suspend fun insertMessage(message: MessageEntity) {
++        messageDao.insert(message)
++        conversationDao.updatePreview(message.conversationId, message.plaintextPreview, message.counterUsed)
++    }
++
++    suspend fun updateConversationCounter(id: String, counter: Long) {
++        val existing = conversationDao.getById(id)
++        if (existing != null && counter > existing.lastCounter) {
++            conversationDao.update(existing.copy(lastCounter = counter))
++        }
++    }
++
++    suspend fun deleteConversation(id: String) {
++        messageDao.deleteByConversation(id)
++        conversationDao.deleteById(id)
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/data/Dao.kt b/android/app/src/main/java/com/mycelia/security/data/Dao.kt
+new file mode 100644
+index 0000000..fa6c8e4
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/data/Dao.kt
+@@ -0,0 +1,44 @@
++package com.mycelia.security.data
++
++import androidx.room.Dao
++import androidx.room.Insert
++import androidx.room.OnConflictStrategy
++import androidx.room.Query
++import androidx.room.Update
++import kotlinx.coroutines.flow.Flow
++
++@Dao
++interface ConversationDao {
++    @Query("SELECT * FROM conversations ORDER BY createdAt DESC")
++    fun observeAll(): Flow<List<ConversationEntity>>
++
++    @Query("SELECT * FROM conversations WHERE id = :id")
++    fun observeById(id: String): Flow<ConversationEntity?>
++
++    @Query("SELECT * FROM conversations WHERE id = :id")
++    suspend fun getById(id: String): ConversationEntity?
++
++    @Insert(onConflict = OnConflictStrategy.REPLACE)
++    suspend fun insert(conversation: ConversationEntity)
++
++    @Update
++    suspend fun update(conversation: ConversationEntity)
++
++    @Query("UPDATE conversations SET lastMessagePreview = :preview, lastCounter = :counter WHERE id = :id")
++    suspend fun updatePreview(id: String, preview: String, counter: Long)
++
++    @Query("DELETE FROM conversations WHERE id = :id")
++    suspend fun deleteById(id: String)
++}
++
++@Dao
++interface MessageDao {
++    @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
++    fun observeByConversation(conversationId: String): Flow<List<MessageEntity>>
++
++    @Insert(onConflict = OnConflictStrategy.REPLACE)
++    suspend fun insert(message: MessageEntity)
++
++    @Query("DELETE FROM messages WHERE conversationId = :conversationId")
++    suspend fun deleteByConversation(conversationId: String)
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/data/Entities.kt b/android/app/src/main/java/com/mycelia/security/data/Entities.kt
+new file mode 100644
+index 0000000..3bdbd8c
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/data/Entities.kt
+@@ -0,0 +1,38 @@
++package com.mycelia.security.data
++
++import androidx.room.Entity
++import androidx.room.ForeignKey
++import androidx.room.Index
++import androidx.room.PrimaryKey
++
++@Entity(tableName = "conversations")
++data class ConversationEntity(
++    @PrimaryKey val id: String,
++    val name: String,
++    val createdAt: Long,
++    val seedB64: String,
++    val lastCounter: Long,
++    val lastMessagePreview: String?
++)
++
++@Entity(
++    tableName = "messages",
++    foreignKeys = [
++        ForeignKey(
++            entity = ConversationEntity::class,
++            parentColumns = ["id"],
++            childColumns = ["conversationId"],
++            onDelete = ForeignKey.CASCADE
++        )
++    ],
++    indices = [Index("conversationId")]
++)
++data class MessageEntity(
++    @PrimaryKey val id: String,
++    val conversationId: String,
++    val timestamp: Long,
++    val direction: String,
++    val plaintextPreview: String,
++    val ciphertextHexOptional: String?,
++    val counterUsed: Long
++)
+diff --git a/android/app/src/main/java/com/mycelia/security/network/ChatProtocol.kt b/android/app/src/main/java/com/mycelia/security/network/ChatProtocol.kt
+new file mode 100644
+index 0000000..ce25fba
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/network/ChatProtocol.kt
+@@ -0,0 +1,40 @@
++package com.mycelia.security.network
++
++import android.util.Base64
++import org.json.JSONObject
++
++sealed class ChatPayload(val type: String) {
++    data class Join(val roomId: String) : ChatPayload("join")
++    data class Message(val roomId: String, val bodyCipher: ByteArray, val counter: Long) : ChatPayload("message")
++
++    fun toJson(): JSONObject {
++        val json = JSONObject()
++        json.put("roomId", when (this) {
++            is Join -> roomId
++            is Message -> roomId
++        })
++        json.put("type", type)
++        if (this is Message) {
++            json.put("bodyCipherBase64", Base64.encodeToString(bodyCipher, Base64.NO_WRAP))
++            json.put("counter", counter)
++        }
++        return json
++    }
++
++    companion object {
++        fun fromJson(json: JSONObject): ChatPayload? {
++            val type = json.optString("type")
++            val roomId = json.optString("roomId")
++            return when (type) {
++                "join" -> Join(roomId)
++                "message" -> {
++                    val cipherB64 = json.optString("bodyCipherBase64")
++                    val counter = json.optLong("counter")
++                    val bodyCipher = Base64.decode(cipherB64, Base64.NO_WRAP)
++                    Message(roomId, bodyCipher, counter)
++                }
++                else -> null
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/network/CompressionUtils.kt b/android/app/src/main/java/com/mycelia/security/network/CompressionUtils.kt
+new file mode 100644
+index 0000000..aff2769
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/network/CompressionUtils.kt
+@@ -0,0 +1,35 @@
++package com.mycelia.security.network
++
++import java.io.ByteArrayOutputStream
++import java.util.zip.Deflater
++import java.util.zip.Inflater
++
++object CompressionUtils {
++    fun compress(data: ByteArray): ByteArray {
++        val deflater = Deflater(Deflater.DEFAULT_COMPRESSION)
++        deflater.setInput(data)
++        deflater.finish()
++        val output = ByteArrayOutputStream()
++        val buffer = ByteArray(4096)
++        while (!deflater.finished()) {
++            val count = deflater.deflate(buffer)
++            output.write(buffer, 0, count)
++        }
++        deflater.end()
++        return output.toByteArray()
++    }
++
++    fun decompress(data: ByteArray): ByteArray {
++        val inflater = Inflater()
++        inflater.setInput(data)
++        val output = ByteArrayOutputStream()
++        val buffer = ByteArray(4096)
++        while (!inflater.finished()) {
++            val count = inflater.inflate(buffer)
++            if (count == 0 && inflater.needsInput()) break
++            output.write(buffer, 0, count)
++        }
++        inflater.end()
++        return output.toByteArray()
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/network/Framing.kt b/android/app/src/main/java/com/mycelia/security/network/Framing.kt
+new file mode 100644
+index 0000000..3f20035
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/network/Framing.kt
+@@ -0,0 +1,21 @@
++package com.mycelia.security.network
++
++import java.nio.ByteBuffer
++import java.nio.ByteOrder
++
++object Framing {
++    const val MAX_FRAME_SIZE = 10 * 1024 * 1024
++
++    fun encode(payload: ByteArray): ByteArray {
++        require(payload.size <= MAX_FRAME_SIZE) { "Frame too large" }
++        val buffer = ByteBuffer.allocate(4 + payload.size).order(ByteOrder.BIG_ENDIAN)
++        buffer.putInt(payload.size)
++        buffer.put(payload)
++        return buffer.array()
++    }
++
++    fun decodeLength(prefix: ByteArray): Int {
++        val buffer = ByteBuffer.wrap(prefix).order(ByteOrder.BIG_ENDIAN)
++        return buffer.int
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/network/TcpChatClient.kt b/android/app/src/main/java/com/mycelia/security/network/TcpChatClient.kt
+new file mode 100644
+index 0000000..993cdb6
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/network/TcpChatClient.kt
+@@ -0,0 +1,138 @@
++package com.mycelia.security.network
++
++import kotlinx.coroutines.CoroutineScope
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.SupervisorJob
++import kotlinx.coroutines.channels.Channel
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.MutableSharedFlow
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.asSharedFlow
++import kotlinx.coroutines.flow.asStateFlow
++import kotlinx.coroutines.isActive
++import kotlinx.coroutines.launch
++import kotlinx.coroutines.withContext
++import org.json.JSONObject
++import java.io.BufferedInputStream
++import java.io.BufferedOutputStream
++import java.net.InetSocketAddress
++import java.net.Socket
++import java.nio.charset.StandardCharsets
++import kotlin.math.min
++
++class TcpChatClient(
++    private val host: String,
++    private val port: Int,
++    private val roomId: String
++) {
++    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++    private val sendChannel = Channel<ChatPayload>(Channel.BUFFERED)
++    private val _incoming = MutableSharedFlow<ChatPayload>(extraBufferCapacity = 64)
++    private val _connectionState = MutableStateFlow(ConnectionState.Disconnected)
++
++    val incoming = _incoming.asSharedFlow()
++    val connectionState = _connectionState.asStateFlow()
++
++    private var runner: Job? = null
++
++    fun start() {
++        if (runner != null) return
++        runner = scope.launch {
++            reconnectLoop()
++        }
++    }
++
++    suspend fun sendMessage(payload: ChatPayload) {
++        sendChannel.send(payload)
++    }
++
++    fun stop() {
++        runner?.cancel()
++        runner = null
++        scope.launch {
++            sendChannel.close()
++        }
++    }
++
++    private suspend fun reconnectLoop() {
++        var backoffMs = 500L
++        while (scope.isActive) {
++            try {
++                connectOnce()
++                backoffMs = 500L
++            } catch (ex: Exception) {
++                _connectionState.value = ConnectionState.Error(ex.message ?: "Connection error")
++                delay(backoffMs)
++                backoffMs = min(backoffMs * 2, 8000L)
++            }
++        }
++    }
++
++    private suspend fun connectOnce() = withContext(Dispatchers.IO) {
++        val socket = Socket()
++        socket.connect(InetSocketAddress(host, port), 5000)
++        socket.tcpNoDelay = true
++        _connectionState.value = ConnectionState.Connected
++
++        val input = BufferedInputStream(socket.getInputStream())
++        val output = BufferedOutputStream(socket.getOutputStream())
++
++        writeFrame(output, ChatPayload.Join(roomId))
++
++        try {
++            val readerJob = scope.launch { readLoop(input) }
++            val writerJob = scope.launch { writeLoop(output) }
++            readerJob.join()
++            writerJob.cancel()
++        } finally {
++            socket.close()
++            _connectionState.value = ConnectionState.Disconnected
++        }
++    }
++
++    private suspend fun readLoop(input: BufferedInputStream) {
++        val lengthPrefix = ByteArray(4)
++        while (scope.isActive) {
++            readExact(input, lengthPrefix)
++            val length = Framing.decodeLength(lengthPrefix)
++            require(length in 1..Framing.MAX_FRAME_SIZE) { "Invalid frame length" }
++            val payload = ByteArray(length)
++            readExact(input, payload)
++            val jsonText = payload.toString(StandardCharsets.UTF_8)
++            val json = JSONObject(jsonText)
++            val parsed = ChatPayload.fromJson(json)
++            if (parsed != null) {
++                _incoming.emit(parsed)
++            }
++        }
++    }
++
++    private suspend fun writeLoop(output: BufferedOutputStream) {
++        for (payload in sendChannel) {
++            writeFrame(output, payload)
++        }
++    }
++
++    private fun writeFrame(output: BufferedOutputStream, payload: ChatPayload) {
++        val jsonBytes = payload.toJson().toString().toByteArray(StandardCharsets.UTF_8)
++        val frame = Framing.encode(jsonBytes)
++        output.write(frame)
++        output.flush()
++    }
++
++    private fun readExact(input: BufferedInputStream, buffer: ByteArray) {
++        var offset = 0
++        while (offset < buffer.size) {
++            val read = input.read(buffer, offset, buffer.size - offset)
++            if (read == -1) throw IllegalStateException("EOF")
++            offset += read
++        }
++    }
++
++    sealed class ConnectionState {
++        data object Connected : ConnectionState()
++        data object Disconnected : ConnectionState()
++        data class Error(val message: String) : ConnectionState()
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/settings/SettingsRepository.kt b/android/app/src/main/java/com/mycelia/security/settings/SettingsRepository.kt
+new file mode 100644
+index 0000000..127ee16
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/settings/SettingsRepository.kt
+@@ -0,0 +1,44 @@
++package com.mycelia.security.settings
++
++import android.content.Context
++import androidx.datastore.preferences.core.booleanPreferencesKey
++import androidx.datastore.preferences.core.edit
++import androidx.datastore.preferences.core.intPreferencesKey
++import androidx.datastore.preferences.core.stringPreferencesKey
++import androidx.datastore.preferences.preferencesDataStore
++import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.flow.map
++
++private val Context.dataStore by preferencesDataStore(name = "settings")
++
++class SettingsRepository(private val context: Context) {
++    private val hostKey = stringPreferencesKey("host")
++    private val portKey = intPreferencesKey("port")
++    private val compressionKey = booleanPreferencesKey("compression")
++
++    val settingsFlow: Flow<SettingsState> = context.dataStore.data.map { prefs ->
++        SettingsState(
++            host = prefs[hostKey] ?: "10.0.2.2",
++            port = prefs[portKey] ?: 8989,
++            compressionEnabled = prefs[compressionKey] ?: false
++        )
++    }
++
++    suspend fun updateHost(host: String) {
++        context.dataStore.edit { it[hostKey] = host }
++    }
++
++    suspend fun updatePort(port: Int) {
++        context.dataStore.edit { it[portKey] = port }
++    }
++
++    suspend fun updateCompression(enabled: Boolean) {
++        context.dataStore.edit { it[compressionKey] = enabled }
++    }
++}
++
++data class SettingsState(
++    val host: String,
++    val port: Int,
++    val compressionEnabled: Boolean
++)
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/ChatViewModel.kt b/android/app/src/main/java/com/mycelia/security/ui/ChatViewModel.kt
+new file mode 100644
+index 0000000..133b25c
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/ChatViewModel.kt
+@@ -0,0 +1,168 @@
++package com.mycelia.security.ui
++
++import androidx.lifecycle.SavedStateHandle
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.mycelia.security.crypto.CounterManager
++import com.mycelia.security.crypto.CryptoEngine
++import com.mycelia.security.crypto.SeedManager
++import com.mycelia.security.data.ChatRepository
++import com.mycelia.security.data.ConversationEntity
++import com.mycelia.security.data.MessageEntity
++import com.mycelia.security.network.ChatPayload
++import com.mycelia.security.network.TcpChatClient
++import com.mycelia.security.network.CompressionUtils
++import com.mycelia.security.settings.SettingsRepository
++import com.mycelia.security.settings.SettingsState
++import kotlinx.coroutines.Job
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.SharingStarted
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.combine
++import kotlinx.coroutines.flow.distinctUntilChangedBy
++import kotlinx.coroutines.flow.filterNotNull
++import kotlinx.coroutines.flow.stateIn
++import kotlinx.coroutines.launch
++import java.nio.charset.StandardCharsets
++import java.util.UUID
++
++class ChatViewModel(
++    private val repository: ChatRepository,
++    private val cryptoEngine: CryptoEngine,
++    private val settingsRepository: SettingsRepository,
++    savedStateHandle: SavedStateHandle
++) : ViewModel() {
++    private val conversationId: String = requireNotNull(savedStateHandle["conversationId"]) {
++        "conversationId missing"
++    }
++
++    private val conversationState = repository.observeConversation(conversationId)
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
++    private val messagesFlow = repository.observeMessages(conversationId)
++    private val _connectionState = MutableStateFlow<TcpChatClient.ConnectionState>(TcpChatClient.ConnectionState.Disconnected)
++    private val compressionEnabled = MutableStateFlow(false)
++
++    val uiState: StateFlow<ChatUiState> = combine(
++        conversationState,
++        messagesFlow,
++        _connectionState
++    ) { conversation, messages, connection ->
++        ChatUiState(conversation, messages, connection)
++    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatUiState(null, emptyList(), TcpChatClient.ConnectionState.Disconnected))
++
++    private var clientJob: Job? = null
++    private var currentClient: TcpChatClient? = null
++
++    init {
++        viewModelScope.launch {
++            settingsRepository.settingsFlow.collect { settings ->
++                compressionEnabled.value = settings.compressionEnabled
++                restartClient(settings)
++            }
++        }
++    }
++
++    private fun restartClient(settings: SettingsState) {
++        clientJob?.cancel()
++        currentClient?.stop()
++        currentClient = null
++        clientJob = viewModelScope.launch {
++            conversationState.filterNotNull().distinctUntilChangedBy { it.seedB64 }.collect { conversation ->
++                currentClient?.stop()
++                val client = TcpChatClient(
++                    host = settings.host,
++                    port = settings.port,
++                    roomId = conversation.seedB64
++                )
++                currentClient = client
++                client.start()
++                viewModelScope.launch {
++                    client.connectionState.collect { _connectionState.value = it }
++                }
++                viewModelScope.launch {
++                    client.incoming.collect { payload ->
++                        if (payload is ChatPayload.Message) {
++                            handleIncoming(conversation, payload)
++                        }
++                    }
++                }
++            }
++        }
++    }
++
++    fun sendMessage(text: String) {
++        val trimmed = text.trim()
++        if (trimmed.isEmpty()) return
++        viewModelScope.launch {
++            val conversation = conversationState.value ?: return@launch
++            val seed = SeedManager.decodeSeed(conversation.seedB64)
++            val counter = conversation.lastCounter + 1
++            val streamOffset = CounterManager.streamOffset(counter, 0)
++            val cipherRaw = cryptoEngine.encrypt(trimmed.toByteArray(StandardCharsets.UTF_8), seed, streamOffset)
++            val cipher = if (compressionEnabled.value) {
++                CompressionUtils.compress(cipherRaw)
++            } else {
++                cipherRaw
++            }
++            val payload = ChatPayload.Message(conversation.seedB64, cipher, counter)
++            currentClient?.sendMessage(payload)
++
++            val preview = trimmed.take(200)
++            repository.insertMessage(
++                MessageEntity(
++                    id = UUID.randomUUID().toString(),
++                    conversationId = conversation.id,
++                    timestamp = System.currentTimeMillis(),
++                    direction = "OUT",
++                    plaintextPreview = preview,
++                    ciphertextHexOptional = null,
++                    counterUsed = counter
++                )
++            )
++            repository.updateConversationCounter(conversation.id, counter)
++        }
++    }
++
++    private suspend fun handleIncoming(conversation: ConversationEntity, payload: ChatPayload.Message) {
++        if (payload.roomId != conversation.seedB64) return
++        val seed = SeedManager.decodeSeed(conversation.seedB64)
++        val streamOffset = CounterManager.streamOffset(payload.counter, 0)
++        val cipher = if (compressionEnabled.value) {
++            CompressionUtils.decompress(payload.bodyCipher)
++        } else {
++            payload.bodyCipher
++        }
++        val plainBytes = cryptoEngine.decrypt(cipher, seed, streamOffset)
++        val text = plainBytes.toString(StandardCharsets.UTF_8)
++        val preview = text.take(200)
++        repository.insertMessage(
++            MessageEntity(
++                id = UUID.randomUUID().toString(),
++                conversationId = conversation.id,
++                timestamp = System.currentTimeMillis(),
++                direction = "IN",
++                plaintextPreview = preview,
++                ciphertextHexOptional = null,
++                counterUsed = payload.counter
++            )
++        )
++        repository.updateConversationCounter(conversation.id, payload.counter)
++    }
++
++    fun wipeConversation() {
++        viewModelScope.launch {
++            repository.deleteConversation(conversationId)
++        }
++    }
++
++    override fun onCleared() {
++        super.onCleared()
++        currentClient?.stop()
++    }
++}
++
++data class ChatUiState(
++    val conversation: ConversationEntity?,
++    val messages: List<MessageEntity>,
++    val connectionState: TcpChatClient.ConnectionState
++)
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/ConversationsViewModel.kt b/android/app/src/main/java/com/mycelia/security/ui/ConversationsViewModel.kt
+new file mode 100644
+index 0000000..95f4b4d
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/ConversationsViewModel.kt
+@@ -0,0 +1,34 @@
++package com.mycelia.security.ui
++
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.mycelia.security.crypto.SeedManager
++import com.mycelia.security.data.ChatRepository
++import com.mycelia.security.data.ConversationEntity
++import kotlinx.coroutines.flow.SharingStarted
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.stateIn
++import kotlinx.coroutines.launch
++
++class ConversationsViewModel(
++    private val repository: ChatRepository
++) : ViewModel() {
++    val conversations: StateFlow<List<ConversationEntity>> =
++        repository.observeConversations().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
++    fun createConversation(name: String, onCreated: (String) -> Unit) {
++        val seed = SeedManager.generateSeed()
++        val seedB64 = SeedManager.encodeSeed(seed)
++        viewModelScope.launch {
++            val id = repository.createConversation(name, seedB64)
++            onCreated(id)
++        }
++    }
++
++    fun joinConversation(name: String, seedB64: String, onCreated: (String) -> Unit) {
++        viewModelScope.launch {
++            val id = repository.createConversation(name, seedB64)
++            onCreated(id)
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/InviteViewModel.kt b/android/app/src/main/java/com/mycelia/security/ui/InviteViewModel.kt
+new file mode 100644
+index 0000000..bca1afa
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/InviteViewModel.kt
+@@ -0,0 +1,26 @@
++package com.mycelia.security.ui
++
++import androidx.lifecycle.SavedStateHandle
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.mycelia.security.data.ChatRepository
++import com.mycelia.security.data.ConversationEntity
++import kotlinx.coroutines.flow.SharingStarted
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.stateIn
++
++class InviteViewModel(
++    repository: ChatRepository,
++    savedStateHandle: SavedStateHandle
++) : ViewModel() {
++    private val conversationId: String? = savedStateHandle.get<String>("conversationId")
++
++    val conversation: StateFlow<ConversationEntity?> =
++        if (conversationId != null) {
++            repository.observeConversation(conversationId)
++                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
++        } else {
++            kotlinx.coroutines.flow.flowOf(null)
++                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
++        }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/SettingsViewModel.kt b/android/app/src/main/java/com/mycelia/security/ui/SettingsViewModel.kt
+new file mode 100644
+index 0000000..12065dc
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/SettingsViewModel.kt
+@@ -0,0 +1,27 @@
++package com.mycelia.security.ui
++
++import androidx.lifecycle.ViewModel
++import androidx.lifecycle.viewModelScope
++import com.mycelia.security.settings.SettingsRepository
++import com.mycelia.security.settings.SettingsState
++import kotlinx.coroutines.flow.SharingStarted
++import kotlinx.coroutines.flow.StateFlow
++import kotlinx.coroutines.flow.stateIn
++import kotlinx.coroutines.launch
++
++class SettingsViewModel(private val repository: SettingsRepository) : ViewModel() {
++    val settings: StateFlow<SettingsState> = repository.settingsFlow
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsState("10.0.2.2", 8989, false))
++
++    fun updateHost(host: String) {
++        viewModelScope.launch { repository.updateHost(host) }
++    }
++
++    fun updatePort(port: Int) {
++        viewModelScope.launch { repository.updatePort(port) }
++    }
++
++    fun updateCompression(enabled: Boolean) {
++        viewModelScope.launch { repository.updateCompression(enabled) }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/screens/ChatScreen.kt b/android/app/src/main/java/com/mycelia/security/ui/screens/ChatScreen.kt
+new file mode 100644
+index 0000000..2281054
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/screens/ChatScreen.kt
+@@ -0,0 +1,152 @@
++package com.mycelia.security.ui.screens
++
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.Spacer
++import androidx.compose.foundation.layout.width
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material.icons.filled.Delete
++import androidx.compose.material.icons.filled.QrCode
++import androidx.compose.material3.AlertDialog
++import androidx.compose.material3.Button
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.material3.TextField
++import androidx.compose.material3.TopAppBar
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.mycelia.security.MyceliaViewModelFactory
++import com.mycelia.security.data.MessageEntity
++import com.mycelia.security.network.TcpChatClient
++import com.mycelia.security.ui.ChatViewModel
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun ChatScreen(
++    factory: MyceliaViewModelFactory,
++    onBack: () -> Unit,
++    onInvite: (String) -> Unit
++) {
++    val viewModel: ChatViewModel = viewModel(factory = factory)
++    val state by viewModel.uiState.collectAsState()
++    var messageText by remember { mutableStateOf("") }
++    var showWipeDialog by remember { mutableStateOf(false) }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text(state.conversation?.name ?: "Chat") },
++                navigationIcon = {
++                    IconButton(onClick = onBack) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                },
++                actions = {
++                    state.conversation?.let { convo ->
++                        IconButton(onClick = { onInvite(convo.id) }) {
++                            Icon(Icons.Default.QrCode, contentDescription = "Invite")
++                        }
++                    }
++                    IconButton(onClick = { showWipeDialog = true }) {
++                        Icon(Icons.Default.Delete, contentDescription = "Wipe")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
++            ConnectionStatus(state.connectionState)
++            LazyColumn(
++                modifier = Modifier.weight(1f).fillMaxWidth().padding(8.dp),
++                verticalArrangement = Arrangement.spacedBy(8.dp)
++            ) {
++                items(state.messages) { message ->
++                    MessageBubble(message)
++                }
++            }
++            Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
++                TextField(
++                    value = messageText,
++                    onValueChange = { messageText = it },
++                    modifier = Modifier.weight(1f),
++                    placeholder = { Text("Nachricht") }
++                )
++                Spacer(modifier = Modifier.width(8.dp))
++                Button(onClick = {
++                    viewModel.sendMessage(messageText)
++                    messageText = ""
++                }) {
++                    Text("Senden")
++                }
++            }
++        }
++    }
++
++    if (showWipeDialog) {
++        AlertDialog(
++            onDismissRequest = { showWipeDialog = false },
++            title = { Text("Chat löschen") },
++            text = { Text("Seed und Nachrichten werden gelöscht. Fortfahren?") },
++            confirmButton = {
++                TextButton(onClick = {
++                    viewModel.wipeConversation()
++                    showWipeDialog = false
++                    onBack()
++                }) {
++                    Text("Löschen")
++                }
++            },
++            dismissButton = {
++                TextButton(onClick = { showWipeDialog = false }) {
++                    Text("Abbrechen")
++                }
++            }
++        )
++    }
++}
++
++@Composable
++private fun MessageBubble(message: MessageEntity) {
++    val alignment = if (message.direction == "OUT") Alignment.End else Alignment.Start
++    Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
++        Text(
++            text = message.plaintextPreview,
++            style = MaterialTheme.typography.bodyLarge,
++            modifier = Modifier.padding(12.dp)
++        )
++    }
++}
++
++@Composable
++private fun ConnectionStatus(state: TcpChatClient.ConnectionState) {
++    val text = when (state) {
++        TcpChatClient.ConnectionState.Connected -> "Verbunden"
++        TcpChatClient.ConnectionState.Disconnected -> "Getrennt"
++        is TcpChatClient.ConnectionState.Error -> "Fehler: ${state.message}"
++    }
++    Text(
++        text = text,
++        style = MaterialTheme.typography.bodySmall,
++        modifier = Modifier.padding(8.dp)
++    )
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/screens/ConversationsScreen.kt b/android/app/src/main/java/com/mycelia/security/ui/screens/ConversationsScreen.kt
+new file mode 100644
+index 0000000..2eb541c
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/screens/ConversationsScreen.kt
+@@ -0,0 +1,144 @@
++package com.mycelia.security.ui.screens
++
++import androidx.compose.foundation.clickable
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.lazy.LazyColumn
++import androidx.compose.foundation.lazy.items
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.Add
++import androidx.compose.material.icons.filled.QrCodeScanner
++import androidx.compose.material.icons.filled.Settings
++import androidx.compose.material3.AlertDialog
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.FloatingActionButton
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextButton
++import androidx.compose.material3.TextField
++import androidx.compose.material3.TopAppBar
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.mycelia.security.MyceliaViewModelFactory
++import com.mycelia.security.ui.ConversationsViewModel
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun ConversationsScreen(
++    factory: MyceliaViewModelFactory,
++    onOpenConversation: (String) -> Unit,
++    onOpenSettings: () -> Unit,
++    onScanInvite: () -> Unit
++) {
++    val viewModel: ConversationsViewModel = viewModel(factory = factory)
++    val conversations by viewModel.conversations.collectAsState()
++    var showCreateDialog by remember { mutableStateOf(false) }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Mycelia Chats") },
++                actions = {
++                    IconButton(onClick = onScanInvite) {
++                        Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan Invite")
++                    }
++                    IconButton(onClick = onOpenSettings) {
++                        Icon(Icons.Default.Settings, contentDescription = "Settings")
++                    }
++                }
++            )
++        },
++        floatingActionButton = {
++            FloatingActionButton(onClick = { showCreateDialog = true }) {
++                Icon(Icons.Default.Add, contentDescription = "New Conversation")
++            }
++        }
++    ) { padding ->
++        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
++            items(conversations) { conversation ->
++                Column(
++                    modifier = Modifier
++                        .fillMaxWidth()
++                        .clickable { onOpenConversation(conversation.id) }
++                        .padding(16.dp)
++                ) {
++                    Text(conversation.name, style = MaterialTheme.typography.titleMedium)
++                    Text(
++                        conversation.lastMessagePreview ?: "Noch keine Nachrichten",
++                        style = MaterialTheme.typography.bodyMedium
++                    )
++                }
++            }
++        }
++    }
++
++    if (showCreateDialog) {
++        ConversationDialog(
++            title = "Neue Unterhaltung",
++            confirmLabel = "Erstellen",
++            onDismiss = { showCreateDialog = false },
++            onConfirm = { name, seed ->
++                showCreateDialog = false
++                if (seed.isBlank()) {
++                    viewModel.createConversation(name) { id -> onOpenConversation(id) }
++                } else {
++                    viewModel.joinConversation(name, seed) { id -> onOpenConversation(id) }
++                }
++            }
++        )
++    }
++
++}
++
++@Composable
++private fun ConversationDialog(
++    title: String,
++    confirmLabel: String,
++    onDismiss: () -> Unit,
++    onConfirm: (String, String) -> Unit
++) {
++    var name by remember { mutableStateOf("Session") }
++    var seed by remember { mutableStateOf("") }
++
++    AlertDialog(
++        onDismissRequest = onDismiss,
++        title = { Text(title) },
++        text = {
++            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
++                TextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
++                TextField(
++                    value = seed,
++                    onValueChange = { seed = it },
++                    label = { Text("Invite Code (optional)") }
++                )
++                Text(
++                    "Leer lassen für neue Seed. Invite Code = Base64 Seed.",
++                    style = MaterialTheme.typography.bodySmall
++                )
++            }
++        },
++        confirmButton = {
++            TextButton(onClick = { onConfirm(name.ifBlank { "Session" }, seed.trim()) }) {
++                Text(confirmLabel)
++            }
++        },
++        dismissButton = {
++            TextButton(onClick = onDismiss) {
++                Text("Abbrechen")
++            }
++        }
++    )
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/screens/InviteScreen.kt b/android/app/src/main/java/com/mycelia/security/ui/screens/InviteScreen.kt
+new file mode 100644
+index 0000000..d265d2e
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/screens/InviteScreen.kt
+@@ -0,0 +1,156 @@
++package com.mycelia.security.ui.screens
++
++import android.graphics.Bitmap
++import androidx.activity.compose.rememberLauncherForActivityResult
++import androidx.activity.result.contract.ActivityResultContracts
++import androidx.compose.foundation.Image
++import androidx.compose.foundation.layout.Arrangement
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.padding
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material3.Button
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextField
++import androidx.compose.material3.TopAppBar
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.graphics.asImageBitmap
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.viewinterop.AndroidView
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.google.zxing.BarcodeFormat
++import com.google.zxing.MultiFormatWriter
++import com.google.zxing.common.BitMatrix
++import com.journeyapps.barcodescanner.BarcodeCallback
++import com.journeyapps.barcodescanner.BarcodeResult
++import com.journeyapps.barcodescanner.DecoratedBarcodeView
++import com.mycelia.security.MyceliaViewModelFactory
++import com.mycelia.security.ui.ConversationsViewModel
++import com.mycelia.security.ui.InviteViewModel
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun InviteScreen(
++    factory: MyceliaViewModelFactory,
++    onBack: () -> Unit,
++    onJoinConversation: (String) -> Unit
++) {
++    val inviteViewModel: InviteViewModel = viewModel(factory = factory)
++    val conversationsViewModel: ConversationsViewModel = viewModel(factory = factory)
++    val conversation by inviteViewModel.conversation.collectAsState()
++    var inviteCode by remember { mutableStateOf("") }
++    var showScanner by remember { mutableStateOf(false) }
++    var cameraGranted by remember { mutableStateOf(false) }
++
++    val permissionLauncher = rememberLauncherForActivityResult(
++        ActivityResultContracts.RequestPermission()
++    ) { granted ->
++        cameraGranted = granted
++        showScanner = granted
++    }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Invite / QR") },
++                navigationIcon = {
++                    IconButton(onClick = onBack) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        Column(
++            modifier = Modifier
++                .padding(padding)
++                .padding(16.dp),
++            verticalArrangement = Arrangement.spacedBy(16.dp)
++        ) {
++            if (conversation != null) {
++                Text("Invite Code (Base64 Seed)")
++                TextField(
++                    value = conversation?.seedB64 ?: "",
++                    onValueChange = {},
++                    readOnly = true,
++                    modifier = Modifier.fillMaxWidth()
++                )
++                QrCodeImage(data = conversation?.seedB64 ?: "")
++            }
++
++            Text("Invite Code scannen oder einfügen")
++            TextField(
++                value = inviteCode,
++                onValueChange = { inviteCode = it },
++                label = { Text("Invite Code") }
++            )
++            Button(onClick = {
++                permissionLauncher.launch(android.Manifest.permission.CAMERA)
++            }) {
++                Text("QR Scan starten")
++            }
++            Button(onClick = {
++                val code = inviteCode.trim()
++                if (code.isNotEmpty()) {
++                    conversationsViewModel.joinConversation("Neue Session", code) { id ->
++                        onJoinConversation(id)
++                    }
++                }
++            }) {
++                Text("Invite verwenden")
++            }
++
++            if (showScanner && cameraGranted) {
++                AndroidView(
++                    factory = { context ->
++                        DecoratedBarcodeView(context).apply {
++                            decodeContinuous(object : BarcodeCallback {
++                                override fun barcodeResult(result: BarcodeResult?) {
++                                    val text = result?.text ?: return
++                                    inviteCode = text
++                                    showScanner = false
++                                    pause()
++                                }
++                            })
++                            resume()
++                        }
++                    },
++                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
++                )
++            }
++        }
++    }
++}
++
++@Composable
++private fun QrCodeImage(data: String) {
++    if (data.isBlank()) return
++    val matrix = remember(data) {
++        MultiFormatWriter().encode(data, BarcodeFormat.QR_CODE, 600, 600)
++    }
++    val bitmap = remember(matrix) { matrix.toBitmap() }
++    Image(bitmap = bitmap.asImageBitmap(), contentDescription = "Invite QR")
++}
++
++private fun BitMatrix.toBitmap(): Bitmap {
++    val width = width
++    val height = height
++    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
++    for (x in 0 until width) {
++        for (y in 0 until height) {
++            bitmap.setPixel(x, y, if (get(x, y)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt())
++        }
++    }
++    return bitmap
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/screens/SettingsScreen.kt b/android/app/src/main/java/com/mycelia/security/ui/screens/SettingsScreen.kt
+new file mode 100644
+index 0000000..95f3aae
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/screens/SettingsScreen.kt
+@@ -0,0 +1,74 @@
++package com.mycelia.security.ui.screens
++
++import androidx.compose.foundation.layout.Column
++import androidx.compose.foundation.layout.fillMaxSize
++import androidx.compose.foundation.layout.padding
++import androidx.compose.material.icons.Icons
++import androidx.compose.material.icons.filled.ArrowBack
++import androidx.compose.material3.ExperimentalMaterial3Api
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.Scaffold
++import androidx.compose.material3.Switch
++import androidx.compose.material3.Text
++import androidx.compose.material3.TextField
++import androidx.compose.material3.TopAppBar
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.collectAsState
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.unit.dp
++import androidx.lifecycle.viewmodel.compose.viewModel
++import com.mycelia.security.MyceliaViewModelFactory
++import com.mycelia.security.ui.SettingsViewModel
++
++@OptIn(ExperimentalMaterial3Api::class)
++@Composable
++fun SettingsScreen(factory: MyceliaViewModelFactory, onBack: () -> Unit) {
++    val viewModel: SettingsViewModel = viewModel(factory = factory)
++    val settings by viewModel.settings.collectAsState()
++    var host by remember(settings.host) { mutableStateOf(settings.host) }
++    var port by remember(settings.port) { mutableStateOf(settings.port.toString()) }
++
++    Scaffold(
++        topBar = {
++            TopAppBar(
++                title = { Text("Einstellungen") },
++                navigationIcon = {
++                    IconButton(onClick = onBack) {
++                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
++                    }
++                }
++            )
++        }
++    ) { padding ->
++        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
++            TextField(
++                value = host,
++                onValueChange = {
++                    host = it
++                    viewModel.updateHost(it)
++                },
++                label = { Text("Server Host") }
++            )
++            TextField(
++                value = port,
++                onValueChange = {
++                    port = it
++                    it.toIntOrNull()?.let { value -> viewModel.updatePort(value) }
++                },
++                label = { Text("Server Port") }
++            )
++            Column(modifier = Modifier.padding(top = 16.dp)) {
++                Text("Kompression (zlib)")
++                Switch(
++                    checked = settings.compressionEnabled,
++                    onCheckedChange = { viewModel.updateCompression(it) }
++                )
++            }
++        }
++    }
++}
+diff --git a/android/app/src/main/java/com/mycelia/security/ui/theme/Theme.kt b/android/app/src/main/java/com/mycelia/security/ui/theme/Theme.kt
+new file mode 100644
+index 0000000..d840509
+--- /dev/null
++++ b/android/app/src/main/java/com/mycelia/security/ui/theme/Theme.kt
+@@ -0,0 +1,43 @@
++package com.mycelia.security.ui.theme
++
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.darkColorScheme
++import androidx.compose.material3.lightColorScheme
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.SideEffect
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.platform.LocalView
++import androidx.core.view.WindowCompat
++
++private val LightColors = lightColorScheme(
++    primary = Color(0xFF005B9A),
++    secondary = Color(0xFF3A7CA5),
++    tertiary = Color(0xFF7A4DCC)
++)
++
++private val DarkColors = darkColorScheme(
++    primary = Color(0xFF6DB6FF),
++    secondary = Color(0xFF9FC4E0),
++    tertiary = Color(0xFFD0BCFF)
++)
++
++@Composable
++fun MyceliaTheme(
++    darkTheme: Boolean,
++    content: @Composable () -> Unit
++) {
++    val colors = if (darkTheme) DarkColors else LightColors
++    val view = LocalView.current
++    if (!view.isInEditMode) {
++        SideEffect {
++            val window = (view.context as? android.app.Activity)?.window
++            if (window != null) {
++                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
++            }
++        }
++    }
++    MaterialTheme(
++        colorScheme = colors,
++        content = content
++    )
++}
+diff --git a/android/app/src/main/res/values/themes.xml b/android/app/src/main/res/values/themes.xml
+new file mode 100644
+index 0000000..a0825fa
+--- /dev/null
++++ b/android/app/src/main/res/values/themes.xml
+@@ -0,0 +1,5 @@
++<resources>
++    <style name="Theme.Mycelia" parent="Theme.Material3.DayNight.NoActionBar">
++        <item name="android:statusBarColor">@android:color/transparent</item>
++    </style>
++</resources>
+diff --git a/android/app/src/test/java/com/mycelia/security/CounterManagerTest.kt b/android/app/src/test/java/com/mycelia/security/CounterManagerTest.kt
+new file mode 100644
+index 0000000..463e496
+--- /dev/null
++++ b/android/app/src/test/java/com/mycelia/security/CounterManagerTest.kt
+@@ -0,0 +1,13 @@
++package com.mycelia.security
++
++import com.mycelia.security.crypto.CounterManager
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class CounterManagerTest {
++    @Test
++    fun streamOffsetUsesStride() {
++        val offset = CounterManager.streamOffset(2, 128)
++        assertEquals(2 * CounterManager.STRIDE_BYTES + 128, offset)
++    }
++}
+diff --git a/android/app/src/test/java/com/mycelia/security/FramingTest.kt b/android/app/src/test/java/com/mycelia/security/FramingTest.kt
+new file mode 100644
+index 0000000..2701941
+--- /dev/null
++++ b/android/app/src/test/java/com/mycelia/security/FramingTest.kt
+@@ -0,0 +1,15 @@
++package com.mycelia.security
++
++import com.mycelia.security.network.Framing
++import org.junit.Assert.assertEquals
++import org.junit.Test
++
++class FramingTest {
++    @Test
++    fun encodeAddsLengthPrefix() {
++        val payload = "hello".toByteArray()
++        val frame = Framing.encode(payload)
++        val length = Framing.decodeLength(frame.copyOfRange(0, 4))
++        assertEquals(payload.size, length)
++    }
++}
+diff --git a/android/app/src/test/java/com/mycelia/security/SeedManagerTest.kt b/android/app/src/test/java/com/mycelia/security/SeedManagerTest.kt
+new file mode 100644
+index 0000000..a8d46d9
+--- /dev/null
++++ b/android/app/src/test/java/com/mycelia/security/SeedManagerTest.kt
+@@ -0,0 +1,15 @@
++package com.mycelia.security
++
++import com.mycelia.security.crypto.SeedManager
++import org.junit.Assert.assertArrayEquals
++import org.junit.Test
++
++class SeedManagerTest {
++    @Test
++    fun encodeDecodeRoundTrip() {
++        val seed = SeedManager.generateSeed(32)
++        val encoded = SeedManager.encodeSeed(seed)
++        val decoded = SeedManager.decodeSeed(encoded)
++        assertArrayEquals(seed, decoded)
++    }
++}
+diff --git a/android/build.gradle.kts b/android/build.gradle.kts
+new file mode 100644
+index 0000000..ec5fc9d
+--- /dev/null
++++ b/android/build.gradle.kts
+@@ -0,0 +1,5 @@
++plugins {
++    id("com.android.application") version "8.5.0" apply false
++    id("org.jetbrains.kotlin.android") version "1.9.24" apply false
++    id("org.jetbrains.kotlin.kapt") version "1.9.24" apply false
++}
+diff --git a/android/gradle.properties b/android/gradle.properties
+new file mode 100644
+index 0000000..9650bbc
+--- /dev/null
++++ b/android/gradle.properties
+@@ -0,0 +1,4 @@
++org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
++android.useAndroidX=true
++android.enableJetifier=true
++kotlin.code.style=official
+diff --git a/android/settings.gradle.kts b/android/settings.gradle.kts
+new file mode 100644
+index 0000000..e5b462e
+--- /dev/null
++++ b/android/settings.gradle.kts
+@@ -0,0 +1,18 @@
++pluginManagement {
++    repositories {
++        google()
++        mavenCentral()
++        gradlePluginPortal()
++    }
++}
++
++dependencyResolutionManagement {
++    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
++    repositories {
++        google()
++        mavenCentral()
++    }
++}
++
++rootProject.name = "mycelia-android"
++include(":app")
+diff --git a/tools/server/README.md b/tools/server/README.md
+new file mode 100644
+index 0000000..31e6946
+--- /dev/null
++++ b/tools/server/README.md
+@@ -0,0 +1,23 @@
++# Mycelia Chat Server (TCP)
++
++Dieser Server vermittelt ausschließlich verschlüsselte Payloads. Er kennt keinen Klartext.
++
++## Start
++
++```bash
++python3 tools/server/mycelia_chat_server.py
++```
++
++Standard-Port: `8989` (bindet an `0.0.0.0`).
++
++## Protokoll
++
++- TCP
++- Frame: 4-Byte Länge (u32 big-endian) + JSON Payload
++- JSON:
++  - `type`: `join` oder `message`
++  - `roomId`: Invite Code (Base64 Seed)
++  - `bodyCipherBase64`: Ciphertext (nur bei `message`)
++  - `counter`: Message Counter (nur bei `message`)
++
++Der Server leitet Frames innerhalb desselben `roomId` an alle Clients weiter.
+diff --git a/tools/server/mycelia_chat_server.py b/tools/server/mycelia_chat_server.py
+new file mode 100644
+index 0000000..bf8aa71
+--- /dev/null
++++ b/tools/server/mycelia_chat_server.py
+@@ -0,0 +1,90 @@
++import asyncio
++import json
++import struct
++from collections import defaultdict
++from typing import Dict, Set
++
++MAX_FRAME_SIZE = 10 * 1024 * 1024
++
++
++async def read_exact(reader: asyncio.StreamReader, size: int) -> bytes:
++    data = await reader.readexactly(size)
++    return data
++
++
++async def read_frame(reader: asyncio.StreamReader) -> bytes:
++    prefix = await read_exact(reader, 4)
++    length = struct.unpack(">I", prefix)[0]
++    if length <= 0 or length > MAX_FRAME_SIZE:
++        raise ValueError("Invalid frame length")
++    return await read_exact(reader, length)
++
++
++async def write_frame(writer: asyncio.StreamWriter, payload: bytes) -> None:
++    if len(payload) > MAX_FRAME_SIZE:
++        raise ValueError("Frame too large")
++    writer.write(struct.pack(">I", len(payload)) + payload)
++    await writer.drain()
++
++
++class ChatServer:
++    def __init__(self) -> None:
++        self.rooms: Dict[str, Set[asyncio.StreamWriter]] = defaultdict(set)
++        self.lock = asyncio.Lock()
++
++    async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
++        room_id = ""
++        try:
++            join_payload = await read_frame(reader)
++            join_message = json.loads(join_payload.decode("utf-8"))
++            if join_message.get("type") != "join":
++                return
++            room_id = join_message.get("roomId")
++            if not room_id:
++                return
++            async with self.lock:
++                self.rooms[room_id].add(writer)
++
++            while True:
++                payload = await read_frame(reader)
++                message = json.loads(payload.decode("utf-8"))
++                if message.get("type") != "message":
++                    continue
++                if message.get("roomId") != room_id:
++                    continue
++                await self.broadcast(room_id, payload)
++        except (asyncio.IncompleteReadError, ConnectionResetError):
++            pass
++        except Exception:
++            pass
++        finally:
++            if room_id:
++                async with self.lock:
++                    if writer in self.rooms.get(room_id, set()):
++                        self.rooms[room_id].remove(writer)
++                        if not self.rooms[room_id]:
++                            del self.rooms[room_id]
++            writer.close()
++            await writer.wait_closed()
++
++    async def broadcast(self, room_id: str, payload: bytes) -> None:
++        async with self.lock:
++            writers = list(self.rooms.get(room_id, []))
++        for writer in writers:
++            try:
++                await write_frame(writer, payload)
++            except Exception:
++                continue
++
++
++async def main(host: str = "0.0.0.0", port: int = 8989) -> None:
++    server = ChatServer()
++    server_coro = await asyncio.start_server(server.handle_client, host, port)
++    addresses = ", ".join(str(sock.getsockname()) for sock in server_coro.sockets or [])
++    print(f"Mycelia chat server listening on {addresses}")
++    async with server_coro:
++        await server_coro.serve_forever()
++
++
++if __name__ == "__main__":
++    asyncio.run(main())
