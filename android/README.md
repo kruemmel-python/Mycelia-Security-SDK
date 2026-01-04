@@ -1,37 +1,52 @@
-# Mycelia Android (Vulkan Compute)
+# Mycelia Android Chat (Vulkan Compute)
 
-Dieses Verzeichnis enthält das Android/NDK‑Gerüst für den Mycelia‑Treiber (GPU‑Kern via Vulkan Compute) und den Chat/Vault‑Client.
+Dieses Verzeichnis enthält eine vollständige Android-Chat-App (Jetpack Compose) mit dem Mycelia Vulkan-Compute JNI-Pfad.
 
 ## Überblick
 
-- **NDK/JNI**: Native Bibliothek für Verschlüsselung/Entschlüsselung.
-- **Vulkan Compute**: 1:1 Port der OpenCL‑Keystream‑Logik (SubQG Simulation + Convert‑to‑Bytes + XOR).
-- **MCP/Zlib**: 1:1 Protokoll‑ und Kompressionskompatibilität wie in `python/mycelia_chat.py`.
+- **NDK/JNI**: `libmycelia_native.so` mit `com.mycelia.security.MyceliaNative`
+- **Vulkan Compute**: GPU-Keystream XOR (SPIR-V Shader)
+- **Protokoll**: TCP + Length-Prefix Framing + JSON Payload
+- **Kompression**: Optional zlib (Feature-Flag in den Einstellungen)
+- **Persistenz**: Room DB (`conversations`, `messages`)
+- **Seed-Sharing**: Invite Code (Base64 Seed) + QR
 
-## Shader (SPIR-V) Build – Einzeiler
+## Shader (SPIR-V)
 
-```bash
-glslangValidator -V android/app/src/main/shaders/subqg_init.comp -o android/app/src/main/shaders/subqg_init.spv && glslangValidator -V android/app/src/main/shaders/subqg_simulation.comp -o android/app/src/main/shaders/subqg_simulation.spv && glslangValidator -V android/app/src/main/shaders/mycelia_keystream_xor.comp -o android/app/src/main/shaders/mycelia_keystream_xor.spv
-```
+Die App lädt `mycelia_keystream_xor.spv` zur Runtime aus `app/src/main/assets/shaders/`.
+Die Datei ist bereits im Repo vorhanden.
 
-## Build (NDK)
-
-In Android Studio:
+## Build & Run (Android Studio)
 
 1. `android/` als Projekt öffnen.
-2. NDK und CMake installieren.
-3. Build ausführen. Es wird eine native Bibliothek `libmycelia_native.so` erzeugt.
+2. NDK + CMake installieren.
+3. Sync/Build ausführen.
+4. App starten.
 
-## Hinweise
+## Server starten
 
-- Der Vulkan‑Compute‑Pfad benötigt die SPIR‑V Dateien neben den GLSL‑Shadern.
-- Für 1:1 Kompatibilität muss der `subqg_simulation`‑Shader bytegenau dem OpenCL‑Kern entsprechen.
-- Der JNI‑Aufruf erwartet einen Shader‑Pfad (z. B. App‑internes Files‑Dir mit den SPIR‑V Dateien).
+```bash
+python3 tools/server/mycelia_chat_server.py
+```
 
-## Dateien
+Standard-Port: `8989`.
 
-- `app/src/main/cpp/mycelia_vulkan_compute.*`: Vulkan Compute Pipeline + Buffer‑Handling.
-- `app/src/main/cpp/mycelia_jni.cpp`: JNI‑Bridge für Java/Kotlin.
-- `app/src/main/shaders/subqg_init.comp`: Init‑Kernel (entspricht OpenCL‑Buffer‑Init).
-- `app/src/main/shaders/subqg_simulation.comp`: SubQG Simulation (1:1 Port).
-- `app/src/main/shaders/mycelia_keystream_xor.comp`: Keystream‑Hash + XOR.
+## App konfigurieren
+
+In **Einstellungen**:
+- **Server Host**: z. B. `10.0.2.2` (Android Emulator) oder die LAN-IP des Hosts.
+- **Server Port**: `8989`.
+- **Kompression**: Muss auf beiden Clients gleich gesetzt sein.
+
+## Invite / QR Workflow
+
+1. Neue Unterhaltung erstellen (Seed wird generiert).
+2. Invite Screen öffnen und Base64 Seed oder QR-Code teilen.
+3. Gegenstelle scannt QR oder fügt Invite Code ein.
+
+## Troubleshooting
+
+- **Firewall**: Port `8989` freigeben.
+- **Emulator**: `10.0.2.2` für Host-Loopback nutzen.
+- **Reales Gerät**: Gerät und Server im gleichen WLAN, Host-IP eintragen.
+- **Vulkan/Shader**: Prüfen, ob `mycelia_keystream_xor.spv` in Assets vorhanden ist.
