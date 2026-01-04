@@ -19,6 +19,12 @@ cc -O2 -o refvec_cli refvec_cli.c
 g++ -O2 -std=c++17 -I../../android/app/src/main/cpp -I../../include -o vulkan_runner vulkan_runner.cpp ../../android/app/src/main/cpp/mycelia_vulkan_compute.cpp -lvulkan
 ```
 
+## Windows PowerShell (aus `tools\refvec`) – Einzeiler
+
+```powershell
+g++ -O2 -std=c++17 -I..\..\android\app\src\main\cpp -I..\..\include -I"$env:VULKAN_SDK\Include" -o vulkan_runner.exe vulkan_runner.cpp ..\..\android\app\src\main\cpp\mycelia_vulkan_compute.cpp -L"$env:VULKAN_SDK\Lib" -lvulkan-1
+```
+
 ## Shader Build (SPIR-V) – Einzeiler
 
 ```bash

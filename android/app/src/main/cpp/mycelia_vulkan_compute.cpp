@@ -773,12 +773,99 @@ uint64_t MyceliaVulkanCompute::seedToUint64(const std::vector<uint8_t> &seed_byt
     return seed;
 }
 
-bool MyceliaVulkanCompute::encrypt(const std::vector<uint8_t> &input,\n                                  std::vector<uint8_t> &output,\n                                  const std::vector<uint8_t> &seed,\n                                  uint64_t stream_offset) {\n    if (!ensureVulkanReady()) {\n        log_error(\"Vulkan not initialized\");\n        return false;\n    }\n\n    if (!ensureBuffers(input.size())) {\n        log_error(\"Failed to ensure buffers\");\n        return false;\n    }\n\n        if (input.empty()) {
+bool MyceliaVulkanCompute::encrypt(const std::vector<uint8_t> &input,
+                                  std::vector<uint8_t> &output,
+                                  const std::vector<uint8_t> &seed,
+                                  uint64_t stream_offset) {
+    if (!ensureVulkanReady()) {
+        log_error("Vulkan not initialized");
+        return false;
+    }
+
+    if (!ensureBuffers(input.size())) {
+        log_error("Failed to ensure buffers");
+        return false;
+    }
+
+    if (input.empty()) {
         output.clear();
         return true;
     }
 
-if (!uploadInput(input)) {\n        log_error(\"Failed to upload input\");\n        return false;\n    }\n\n    uint64_t master_seed = seedToUint64(seed);\n    std::array<uint32_t, 8> key{};\n    std::array<uint32_t, 3> nonce{};\n    key_nonce_from_seed(master_seed, key, nonce);\n\n    uint64_t block_index = stream_offset / 64u;\n    uint32_t counter_base = static_cast<uint32_t>(block_index & 0xFFFFFFFFu);\n    uint32_t counter_high = static_cast<uint32_t>((block_index >> 32) & 0xFFFFFFFFu);\n    nonce[2] ^= counter_high;\n    uint32_t offset_in_block = static_cast<uint32_t>(stream_offset % 64u);\n\n    VkCommandBuffer cmd = vk_->commandBuffer;\n    vkResetCommandBuffer(cmd, 0);\n\n    VkCommandBufferBeginInfo beginInfo{};\n    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;\n    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {\n        return false;\n    }\n\n    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk_->pipelineLayout, 0, 1, &vk_->descriptorSet, 0, nullptr);\n\n    struct XorParams {\n        uint32_t key[8];\n        uint32_t nonce[3];\n        uint32_t counter_base;\n        uint32_t offset_in_block;\n        uint32_t data_len;\n    } xorParams{};\n\n    for (int i = 0; i < 8; ++i) {\n        xorParams.key[i] = key[i];\n    }\n    xorParams.nonce[0] = nonce[0];\n    xorParams.nonce[1] = nonce[1];\n    xorParams.nonce[2] = nonce[2];\n    xorParams.counter_base = counter_base;\n    xorParams.offset_in_block = offset_in_block;\n    xorParams.data_len = static_cast<uint32_t>(input.size());\n\n    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk_->xorPipeline);\n    vkCmdPushConstants(cmd, vk_->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(xorParams), &xorParams);\n    uint32_t wordCount = alignUp(static_cast<uint32_t>(input.size()), 4) / 4;\n    uint32_t xorGroups = (wordCount + kLocalSize - 1) / kLocalSize;\n    vkCmdDispatch(cmd, xorGroups, 1, 1);\n\n    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {\n        return false;\n    }\n\n    vkResetFences(vk_->device, 1, &vk_->fence);\n\n    VkSubmitInfo submitInfo{};\n    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;\n    submitInfo.commandBufferCount = 1;\n    submitInfo.pCommandBuffers = &cmd;\n\n    if (vkQueueSubmit(vk_->computeQueue, 1, &submitInfo, vk_->fence) != VK_SUCCESS) {\n        return false;\n    }\n\n    if (vkWaitForFences(vk_->device, 1, &vk_->fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {\n        return false;\n    }\n\n    downloadOutput(output, input.size());\n    return true;\n}\n
+    if (!uploadInput(input)) {
+        log_error("Failed to upload input");
+        return false;
+    }
+
+    uint64_t master_seed = seedToUint64(seed);
+    std::array<uint32_t, 8> key{};
+    std::array<uint32_t, 3> nonce{};
+    key_nonce_from_seed(master_seed, key, nonce);
+
+    uint64_t block_index = stream_offset / 64u;
+    uint32_t counter_base = static_cast<uint32_t>(block_index & 0xFFFFFFFFu);
+    uint32_t counter_high = static_cast<uint32_t>((block_index >> 32) & 0xFFFFFFFFu);
+    nonce[2] ^= counter_high;
+    uint32_t offset_in_block = static_cast<uint32_t>(stream_offset % 64u);
+
+    VkCommandBuffer cmd = vk_->commandBuffer;
+    vkResetCommandBuffer(cmd, 0);
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(cmd, &beginInfo) != VK_SUCCESS) {
+        return false;
+    }
+
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk_->pipelineLayout, 0, 1, &vk_->descriptorSet, 0, nullptr);
+
+    struct XorParams {
+        uint32_t key[8];
+        uint32_t nonce[3];
+        uint32_t counter_base;
+        uint32_t offset_in_block;
+        uint32_t data_len;
+    } xorParams{};
+
+    for (int i = 0; i < 8; ++i) {
+        xorParams.key[i] = key[i];
+    }
+    xorParams.nonce[0] = nonce[0];
+    xorParams.nonce[1] = nonce[1];
+    xorParams.nonce[2] = nonce[2];
+    xorParams.counter_base = counter_base;
+    xorParams.offset_in_block = offset_in_block;
+    xorParams.data_len = static_cast<uint32_t>(input.size());
+
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk_->xorPipeline);
+    vkCmdPushConstants(cmd, vk_->pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(xorParams), &xorParams);
+    uint32_t wordCount = alignUp(static_cast<uint32_t>(input.size()), 4) / 4;
+    uint32_t xorGroups = (wordCount + kLocalSize - 1) / kLocalSize;
+    vkCmdDispatch(cmd, xorGroups, 1, 1);
+
+    if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
+        return false;
+    }
+
+    vkResetFences(vk_->device, 1, &vk_->fence);
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+
+    if (vkQueueSubmit(vk_->computeQueue, 1, &submitInfo, vk_->fence) != VK_SUCCESS) {
+        return false;
+    }
+
+    if (vkWaitForFences(vk_->device, 1, &vk_->fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        return false;
+    }
+
+    downloadOutput(output, input.size());
+    return true;
+}
+
 bool MyceliaVulkanCompute::decrypt(const std::vector<uint8_t> &input,
                                   std::vector<uint8_t> &output,
                                   const std::vector<uint8_t> &seed,
