@@ -1,0 +1,177 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) buffer EnergyBuffer { float energy[]; } energyBuf;
+layout(set = 0, binding = 1, std430) buffer PhaseBuffer { float phase[]; } phaseBuf;
+layout(set = 0, binding = 2, std430) buffer InterferenceBuffer { float interference_out[]; } interferenceBuf;
+layout(set = 0, binding = 3, std430) buffer NodeFlagBuffer { int node_flag_out[]; } nodeFlagBuf;
+layout(set = 0, binding = 4, std430) buffer SpinBuffer { int spin_out[]; } spinBuf;
+layout(set = 0, binding = 5, std430) buffer TopologyBuffer { int topology_out[]; } topologyBuf;
+layout(set = 0, binding = 6, std430) buffer PressureBuffer { float pressure[]; } pressureBuf;
+layout(set = 0, binding = 7, std430) buffer GravityBuffer { float gravity[]; } gravityBuf;
+layout(set = 0, binding = 8, std430) buffer MagnetismBuffer { float magnetism[]; } magnetismBuf;
+layout(set = 0, binding = 9, std430) buffer TemperatureBuffer { float temperature[]; } temperatureBuf;
+layout(set = 0, binding = 10, std430) buffer PotentialBuffer { float potential[]; } potentialBuf;
+layout(set = 0, binding = 11, std430) buffer DriftXBuffer { float drift_x[]; } driftXBuf;
+layout(set = 0, binding = 12, std430) buffer DriftYBuffer { float drift_y[]; } driftYBuf;
+layout(set = 0, binding = 13, std430) buffer RngEnergyBuffer { float rng_energy[]; } rngEnergyBuf;
+layout(set = 0, binding = 14, std430) buffer RngPhaseBuffer { float rng_phase[]; } rngPhaseBuf;
+layout(set = 0, binding = 15, std430) buffer RngSpinBuffer { float rng_spin[]; } rngSpinBuf;
+layout(set = 0, binding = 16, std430) buffer FieldMapBuffer { float field_map[]; } fieldMapBuf;
+
+layout(push_constant) uniform SimParams {
+    float noise_level;
+    float threshold;
+    float noise_factor;
+    int grid_width;
+    int grid_height;
+    int cell_count;
+    int write_field_map;
+} params;
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+float sample_field(const float f[], int x, int y, int W, int H) {
+    if (x < 0) { x = 0; }
+    if (x >= W) { x = W - 1; }
+    if (y < 0) { y = 0; }
+    if (y >= H) { y = H - 1; }
+    int s_idx = y * W + x;
+    return f[s_idx];
+}
+
+float laplace5(const float f[], int x, int y, int W, int H) {
+    float c = sample_field(f, x, y, W, H);
+    float u = sample_field(f, x, y - 1, W, H);
+    float d = sample_field(f, x, y + 1, W, H);
+    float l = sample_field(f, x - 1, y, W, H);
+    float r = sample_field(f, x + 1, y, W, H);
+    return (u + d + l + r - 4.0 * c);
+}
+
+float clamp_field(float v, float lo, float hi) {
+    return min(hi, max(lo, v));
+}
+
+void main() {
+    int idx = int(gl_GlobalInvocationID.x);
+    if (idx >= params.cell_count) {
+        return;
+    }
+
+    int W = params.grid_width;
+    int H = params.grid_height;
+    if (W <= 0) { W = params.cell_count; }
+    if (H <= 0) { H = 1; }
+
+    int x = idx % W;
+    int y = idx / W;
+
+    float rng_energy_val = rngEnergyBuf.rng_energy[idx];
+    float rng_phase_val = rngPhaseBuf.rng_phase[idx];
+    float rng_spin_val = rngSpinBuf.rng_spin[idx];
+    float effective_noise = params.noise_level * params.noise_factor;
+
+    float E = energyBuf.energy[idx];
+    float P = pressureBuf.pressure[idx];
+    float G = gravityBuf.gravity[idx];
+    float M = magnetismBuf.magnetism[idx];
+    float T = temperatureBuf.temperature[idx];
+    float V = potentialBuf.potential[idx];
+    float Dx = driftXBuf.drift_x[idx];
+    float Dy = driftYBuf.drift_y[idx];
+
+    float lap_E = laplace5(energyBuf.energy, x, y, W, H);
+    float lap_P = laplace5(pressureBuf.pressure, x, y, W, H);
+    float lap_G = laplace5(gravityBuf.gravity, x, y, W, H);
+    float lap_M = laplace5(magnetismBuf.magnetism, x, y, W, H);
+    float lap_T = laplace5(temperatureBuf.temperature, x, y, W, H);
+    float lap_V = laplace5(potentialBuf.potential, x, y, W, H);
+
+    const float energy_diff = 0.10;
+    const float pressure_diff = 0.08;
+    const float gravity_diff = 0.02;
+    const float magnetism_diff = 0.03;
+    const float temperature_diff = 0.05;
+    const float potential_diff = 0.04;
+
+    const float c_E_to_P = 0.05;
+    const float c_E_to_T = 0.10;
+    const float c_V_to_G = 0.08;
+    const float c_PG_to_V = 0.04;
+    const float c_D_to_M = 0.02;
+
+    float noise_e = (rng_energy_val - 0.5) * effective_noise;
+    float noise_p = (rng_phase_val - 0.5) * effective_noise;
+    float noise_m = (rng_spin_val - 0.5) * effective_noise;
+
+    float dE = energy_diff * lap_E + noise_e;
+    float dP = pressure_diff * lap_P + c_E_to_P * (E - P) + noise_p;
+    float dT = temperature_diff * lap_T + c_E_to_T * (E - T);
+    float dV = potential_diff * lap_V + c_PG_to_V * (P + G - 2.0 * V);
+    float dG = gravity_diff * lap_G + c_V_to_G * (V - G);
+    float dM = magnetism_diff * lap_M + c_D_to_M * (abs(Dx) + abs(Dy)) + noise_m;
+
+    float drift_atten = 0.95;
+    float accel_scale = 0.05;
+    float gradEx = (sample_field(energyBuf.energy, x + 1, y, W, H) - sample_field(energyBuf.energy, x - 1, y, W, H)) * 0.5;
+    float gradEy = (sample_field(energyBuf.energy, x, y + 1, W, H) - sample_field(energyBuf.energy, x, y - 1, W, H)) * 0.5;
+    float new_Dx = drift_atten * Dx + accel_scale * gradEx;
+    float new_Dy = drift_atten * Dy + accel_scale * gradEy;
+
+    E = clamp_field(E + dE, -1.0, 1.0);
+    P = clamp_field(P + dP, -1.0, 1.0);
+    T = clamp_field(T + dT, -1.0, 1.0);
+    V = clamp_field(V + dV, -1.0, 1.0);
+    G = clamp_field(G + dG, -1.0, 1.0);
+    M = clamp_field(M + dM, -1.0, 1.0);
+
+    float current_phase = phaseBuf.phase[idx];
+    float clamped_phase = clamp_field(current_phase, -1.0, 1.0);
+    float phase_acc = asin(clamped_phase) / float(M_PI);
+    phase_acc += noise_p * 0.2;
+    float updated_phase = sin(phase_acc * float(M_PI));
+
+    energyBuf.energy[idx] = E;
+    pressureBuf.pressure[idx] = P;
+    gravityBuf.gravity[idx] = G;
+    magnetismBuf.magnetism[idx] = M;
+    temperatureBuf.temperature[idx] = T;
+    potentialBuf.potential[idx] = V;
+    driftXBuf.drift_x[idx] = new_Dx;
+    driftYBuf.drift_y[idx] = new_Dy;
+    phaseBuf.phase[idx] = updated_phase;
+
+    float interference = 0.5 * E + 0.3 * P + 0.2 * T;
+    int node_flag = 0;
+    int node_spin = 0;
+    int topology = -1;
+    float high_threshold = params.threshold + (1.0 - params.threshold) * 0.66;
+    float mid_threshold = params.threshold + (1.0 - params.threshold) * 0.33;
+    if (interference > params.threshold) {
+        node_flag = 1;
+        node_spin = (rng_spin_val > 0.5) ? 1 : -1;
+        if (interference > high_threshold) {
+            topology = 2;
+        } else if (interference > mid_threshold) {
+            topology = 1;
+        } else {
+            topology = 0;
+        }
+    }
+
+    interferenceBuf.interference_out[idx] = interference;
+    nodeFlagBuf.node_flag_out[idx] = node_flag;
+    spinBuf.spin_out[idx] = node_spin;
+    topologyBuf.topology_out[idx] = topology;
+
+    if (params.write_field_map != 0) {
+        float fm = 0.4 * E + 0.2 * P + 0.2 * T + 0.2 * V;
+        fm = (fm + 1.0) * 0.5;
+        fm = clamp_field(fm, 0.0, 1.0);
+        fieldMapBuf.field_map[idx] = fm;
+    }
+}
