@@ -29,7 +29,7 @@ class TcpChatClient(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sendChannel = Channel<ChatPayload>(Channel.BUFFERED)
     private val _incoming = MutableSharedFlow<ChatPayload>(extraBufferCapacity = 64)
-    private val _connectionState = MutableStateFlow(ConnectionState.Disconnected)
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
 
     val incoming = _incoming.asSharedFlow()
     val connectionState = _connectionState.asStateFlow()

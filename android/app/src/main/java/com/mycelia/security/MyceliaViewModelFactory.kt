@@ -1,8 +1,8 @@
 package com.mycelia.security
 
-import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.createSavedStateHandle
 import com.mycelia.security.ui.ConversationsViewModel
 import com.mycelia.security.ui.ChatViewModel
@@ -10,7 +10,7 @@ import com.mycelia.security.ui.InviteViewModel
 import com.mycelia.security.ui.SettingsViewModel
 
 class MyceliaViewModelFactory(private val app: MyceliaApp) : ViewModelProvider.Factory {
-    override fun <T : ViewModel> create(modelClass: Class<T>, extras: ViewModelProvider.Factory.CreationExtras): T {
+    override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         val savedStateHandle = extras.createSavedStateHandle()
         return when {
             modelClass.isAssignableFrom(ConversationsViewModel::class.java) -> {
