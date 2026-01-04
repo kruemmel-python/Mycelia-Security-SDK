@@ -5,8 +5,14 @@ Dieses Verzeichnis enthält das Android/NDK‑Gerüst für den Mycelia‑Treiber
 ## Überblick
 
 - **NDK/JNI**: Native Bibliothek für Verschlüsselung/Entschlüsselung.
-- **Vulkan Compute**: Keystream‑Anwendung auf dem GPU‑Pfad.
+- **Vulkan Compute**: 1:1 Port der OpenCL‑Keystream‑Logik (SubQG Simulation + Convert‑to‑Bytes + XOR).
 - **MCP/Zlib**: 1:1 Protokoll‑ und Kompressionskompatibilität wie in `python/mycelia_chat.py`.
+
+## Shader (SPIR-V) Build – Einzeiler
+
+```bash
+glslangValidator -V android/app/src/main/shaders/subqg_init.comp -o android/app/src/main/shaders/subqg_init.spv && glslangValidator -V android/app/src/main/shaders/subqg_simulation.comp -o android/app/src/main/shaders/subqg_simulation.spv && glslangValidator -V android/app/src/main/shaders/mycelia_keystream_xor.comp -o android/app/src/main/shaders/mycelia_keystream_xor.spv
+```
 
 ## Build (NDK)
 
@@ -18,11 +24,14 @@ In Android Studio:
 
 ## Hinweise
 
-- Der Vulkan‑Compute‑Pfad ist vorbereitet und wird für die Keystream‑Anwendung genutzt.
-- Für eine vollständige 1:1 Kompatibilität müssen die Keystream‑Kernels exakt die Logik der bisherigen OpenCL‑Kerne abbilden.
+- Der Vulkan‑Compute‑Pfad benötigt die SPIR‑V Dateien neben den GLSL‑Shadern.
+- Für 1:1 Kompatibilität muss der `subqg_simulation`‑Shader bytegenau dem OpenCL‑Kern entsprechen.
+- Der JNI‑Aufruf erwartet einen Shader‑Pfad (z. B. App‑internes Files‑Dir mit den SPIR‑V Dateien).
 
 ## Dateien
 
 - `app/src/main/cpp/mycelia_vulkan_compute.*`: Vulkan Compute Pipeline + Buffer‑Handling.
 - `app/src/main/cpp/mycelia_jni.cpp`: JNI‑Bridge für Java/Kotlin.
-- `app/src/main/shaders/mycelia_xor.comp`: Compute‑Shader (XOR‑Anwendung).
+- `app/src/main/shaders/subqg_init.comp`: Init‑Kernel (entspricht OpenCL‑Buffer‑Init).
+- `app/src/main/shaders/subqg_simulation.comp`: SubQG Simulation (1:1 Port).
+- `app/src/main/shaders/mycelia_keystream_xor.comp`: Keystream‑Hash + XOR.

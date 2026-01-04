@@ -1,0 +1,43 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) buffer EnergyBuffer { float energy[]; } energyBuf;
+layout(set = 0, binding = 17, std430) buffer InputBuffer { uint data[]; } inputBuf;
+layout(set = 0, binding = 18, std430) buffer OutputBuffer { uint data[]; } outputBuf;
+
+layout(push_constant) uniform XorParams {
+    uint offset_in_block;
+    uint data_len;
+} params;
+
+uint hash_uint(uint v) {
+    uint hash = (v ^ (v >> 16)) * 0x45d9f3b;
+    return hash;
+}
+
+void main() {
+    uint word_index = gl_GlobalInvocationID.x;
+    uint base = word_index * 4u;
+    if (base >= params.data_len) {
+        return;
+    }
+
+    uint in_word = inputBuf.data[word_index];
+    uint out_word = in_word;
+
+    for (uint b = 0u; b < 4u; ++b) {
+        uint byte_index = base + b;
+        if (byte_index >= params.data_len) {
+            break;
+        }
+        uint key_index = params.offset_in_block + byte_index;
+        uint v = floatBitsToUint(energyBuf.energy[key_index]);
+        uint key_byte = hash_uint(v) & 0xFFu;
+        uint in_byte = (in_word >> (8u * b)) & 0xFFu;
+        uint out_byte = in_byte ^ key_byte;
+        out_word = (out_word & ~(0xFFu << (8u * b))) | (out_byte << (8u * b));
+    }
+
+    outputBuf.data[word_index] = out_word;
+}

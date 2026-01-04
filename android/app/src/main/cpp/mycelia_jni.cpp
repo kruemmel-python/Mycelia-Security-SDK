@@ -4,8 +4,12 @@
 #include <vector>
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_mycelia_security_MyceliaNative_nativeInit(JNIEnv *, jobject) {
-    auto *compute = new MyceliaVulkanCompute();
+Java_com_mycelia_security_MyceliaNative_nativeInit(JNIEnv *env, jobject, jstring shaderDir) {
+    const char *dir = env->GetStringUTFChars(shaderDir, nullptr);
+    auto *compute = new MyceliaVulkanCompute(dir ? dir : "");
+    if (dir) {
+        env->ReleaseStringUTFChars(shaderDir, dir);
+    }
     if (!compute->initialize()) {
         delete compute;
         return 0;
@@ -23,28 +27,30 @@ Java_com_mycelia_security_MyceliaNative_nativeRelease(JNIEnv *, jobject, jlong h
     delete compute;
 }
 
+static std::vector<uint8_t> toVector(JNIEnv *env, jbyteArray arr) {
+    jsize len = env->GetArrayLength(arr);
+    std::vector<uint8_t> buf(static_cast<size_t>(len));
+    env->GetByteArrayRegion(arr, 0, len, reinterpret_cast<jbyte *>(buf.data()));
+    return buf;
+}
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_mycelia_security_MyceliaNative_nativeEncrypt(JNIEnv *env,
                                                       jobject,
                                                       jlong handle,
                                                       jbyteArray input,
-                                                      jbyteArray seed) {
+                                                      jbyteArray seed,
+                                                      jlong streamOffset) {
     auto *compute = reinterpret_cast<MyceliaVulkanCompute *>(handle);
     if (!compute) {
         return nullptr;
     }
 
-    jsize inputLen = env->GetArrayLength(input);
-    jsize seedLen = env->GetArrayLength(seed);
-
-    std::vector<uint8_t> inputBuf(static_cast<size_t>(inputLen));
-    std::vector<uint8_t> seedBuf(static_cast<size_t>(seedLen));
-
-    env->GetByteArrayRegion(input, 0, inputLen, reinterpret_cast<jbyte *>(inputBuf.data()));
-    env->GetByteArrayRegion(seed, 0, seedLen, reinterpret_cast<jbyte *>(seedBuf.data()));
+    std::vector<uint8_t> inputBuf = toVector(env, input);
+    std::vector<uint8_t> seedBuf = toVector(env, seed);
 
     std::vector<uint8_t> output;
-    if (!compute->encrypt(inputBuf, output, seedBuf)) {
+    if (!compute->encrypt(inputBuf, output, seedBuf, static_cast<uint64_t>(streamOffset))) {
         return nullptr;
     }
 
@@ -59,23 +65,18 @@ Java_com_mycelia_security_MyceliaNative_nativeDecrypt(JNIEnv *env,
                                                       jobject,
                                                       jlong handle,
                                                       jbyteArray input,
-                                                      jbyteArray seed) {
+                                                      jbyteArray seed,
+                                                      jlong streamOffset) {
     auto *compute = reinterpret_cast<MyceliaVulkanCompute *>(handle);
     if (!compute) {
         return nullptr;
     }
 
-    jsize inputLen = env->GetArrayLength(input);
-    jsize seedLen = env->GetArrayLength(seed);
-
-    std::vector<uint8_t> inputBuf(static_cast<size_t>(inputLen));
-    std::vector<uint8_t> seedBuf(static_cast<size_t>(seedLen));
-
-    env->GetByteArrayRegion(input, 0, inputLen, reinterpret_cast<jbyte *>(inputBuf.data()));
-    env->GetByteArrayRegion(seed, 0, seedLen, reinterpret_cast<jbyte *>(seedBuf.data()));
+    std::vector<uint8_t> inputBuf = toVector(env, input);
+    std::vector<uint8_t> seedBuf = toVector(env, seed);
 
     std::vector<uint8_t> output;
-    if (!compute->decrypt(inputBuf, output, seedBuf)) {
+    if (!compute->decrypt(inputBuf, output, seedBuf, static_cast<uint64_t>(streamOffset))) {
         return nullptr;
     }
 
