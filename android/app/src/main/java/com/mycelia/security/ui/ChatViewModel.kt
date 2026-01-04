@@ -1,0 +1,442 @@
+package com.mycelia.security.ui
+
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import android.content.Context
+import android.net.Uri
+import androidx.lifecycle.viewModelScope
+import com.mycelia.security.crypto.CryptoEngine
+import com.mycelia.security.crypto.Hkdf
+import com.mycelia.security.crypto.KeyExchange
+import com.mycelia.security.crypto.SeedManager
+import com.mycelia.security.data.ChatRepository
+import com.mycelia.security.data.ConversationEntity
+import com.mycelia.security.data.MessageEntity
+import com.mycelia.security.network.ChatPayload
+import com.mycelia.security.network.TcpChatClient
+import com.mycelia.security.network.CompressionUtils
+import com.mycelia.security.settings.SettingsRepository
+import com.mycelia.security.settings.SettingsState
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.io.RandomAccessFile
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import java.nio.charset.StandardCharsets
+import java.util.UUID
+
+class ChatViewModel(
+    private val repository: ChatRepository,
+    private val cryptoEngine: CryptoEngine,
+    private val settingsRepository: SettingsRepository,
+    private val context: Context,
+    savedStateHandle: SavedStateHandle
+) : ViewModel() {
+    private val conversationId: String = requireNotNull(savedStateHandle["conversationId"]) {
+        "conversationId missing"
+    }
+
+    private val conversationState = repository.observeConversation(conversationId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    private val messagesFlow = repository.observeMessages(conversationId)
+    private val _connectionState = MutableStateFlow<TcpChatClient.ConnectionState>(TcpChatClient.ConnectionState.Disconnected)
+    private val compressionEnabled = MutableStateFlow(false)
+    private val sentCounters = mutableSetOf<Long>()
+    private var sessionKey: ByteArray? = null
+    private val pendingMessages = mutableListOf<String>()
+    private var localCounter = 0L
+    private val incomingFiles = mutableMapOf<String, IncomingFileState>()
+
+    val uiState: StateFlow<ChatUiState> = combine(
+        conversationState,
+        messagesFlow,
+        _connectionState
+    ) { conversation, messages, connection ->
+        ChatUiState(conversation, messages, connection)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ChatUiState(null, emptyList(), TcpChatClient.ConnectionState.Disconnected))
+
+    private var clientJob: Job? = null
+    private var currentClient: TcpChatClient? = null
+
+    init {
+        viewModelScope.launch {
+            settingsRepository.settingsFlow.collect { settings ->
+                compressionEnabled.value = settings.compressionEnabled
+                restartClient(settings)
+            }
+        }
+        viewModelScope.launch {
+            conversationState.filterNotNull().collect { conversation ->
+                if (conversation.remotePublicKeyB64 != null) {
+                    deriveSessionKey(conversation)
+                }
+                if (conversation.lastCounter > localCounter) {
+                    localCounter = conversation.lastCounter
+                }
+            }
+        }
+    }
+
+    private fun restartClient(settings: SettingsState) {
+        clientJob?.cancel()
+        currentClient?.stop()
+        currentClient = null
+        clientJob = viewModelScope.launch {
+            conversationState.filterNotNull().distinctUntilChangedBy { it.seedB64 }.collect { conversation ->
+                currentClient?.stop()
+                val client = TcpChatClient(
+                    host = settings.host,
+                    port = settings.port,
+                    roomId = conversation.seedB64,
+                    tlsEnabled = settings.tlsEnabled,
+                    tlsPinSha256 = settings.tlsPinSha256,
+                    tlsCaPem = settings.tlsCaPem
+                )
+                currentClient = client
+                client.start()
+                viewModelScope.launch {
+                    client.connectionState.collect { _connectionState.value = it }
+                }
+                viewModelScope.launch {
+                    client.incoming.collect { payload ->
+                        when (payload) {
+                            is ChatPayload.Hello -> handleHello(conversation, payload)
+                            is ChatPayload.Message -> handleIncoming(conversation, payload)
+                            is ChatPayload.FileChunk -> handleFileChunk(conversation, payload)
+                            else -> Unit
+                        }
+                    }
+                }
+                sendHello(conversation)
+            }
+        }
+    }
+
+    fun sendMessage(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            val conversation = conversationState.value ?: return@launch
+            val key = sessionKey ?: run {
+                pendingMessages.add(trimmed)
+                sendHello(conversation)
+                _connectionState.value = TcpChatClient.ConnectionState.Error("Schlüsselaustausch ausstehend")
+                return@launch
+            }
+            sendMessageInternal(conversation, key, trimmed)
+        }
+    }
+
+    fun sendFile(uri: Uri) {
+        viewModelScope.launch {
+            val conversation = conversationState.value ?: return@launch
+            val key = sessionKey ?: run {
+                pendingMessages.add("[Datei wartet auf Schlüsselaustausch]")
+                sendHello(conversation)
+                _connectionState.value = TcpChatClient.ConnectionState.Error("Schlüsselaustausch ausstehend")
+                return@launch
+            }
+            sendFileInternal(conversation, key, uri)
+        }
+    }
+
+    private suspend fun handleIncoming(conversation: ConversationEntity, payload: ChatPayload.Message) {
+        if (payload.roomId != conversation.seedB64) return
+        if (sentCounters.remove(payload.counter)) {
+            return
+        }
+        if (payload.counter <= conversation.lastCounter) {
+            return
+        }
+        if (payload.counter > localCounter) {
+            localCounter = payload.counter
+        }
+        val key = sessionKey ?: return
+        val cipher = if (compressionEnabled.value) {
+            CompressionUtils.decompress(payload.bodyCipher)
+        } else {
+            payload.bodyCipher
+        }
+        val nonce = buildNonce(payload.counter)
+        val aad = buildAad(conversation.seedB64, payload.counter)
+        val plainBytes = cryptoEngine.aeadDecrypt(key, nonce, cipher, aad)
+        val text = plainBytes.toString(StandardCharsets.UTF_8)
+        val preview = text.take(200)
+        repository.insertMessage(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversation.id,
+                timestamp = System.currentTimeMillis(),
+                direction = "IN",
+                plaintextPreview = preview,
+                ciphertextHexOptional = null,
+                counterUsed = payload.counter
+            )
+        )
+        repository.updateConversationCounter(conversation.id, payload.counter)
+    }
+
+    private suspend fun handleFileChunk(conversation: ConversationEntity, payload: ChatPayload.FileChunk) {
+        if (payload.roomId != conversation.seedB64) return
+        if (sentCounters.remove(payload.counter)) {
+            return
+        }
+        if (payload.counter <= conversation.lastCounter) {
+            return
+        }
+        val key = sessionKey ?: return
+        val nonce = buildNonce(payload.counter)
+        val aad = buildAad(conversation.seedB64, payload.counter)
+        val plain = cryptoEngine.aeadDecrypt(key, nonce, payload.bodyCipher, aad)
+        val state = incomingFiles.getOrPut(payload.fileId) {
+            val dir = getReceivedDir()
+            val fileName = "${payload.fileId}_${payload.fileName}"
+            val file = java.io.File(dir, fileName)
+            RandomAccessFile(file, "rw").use { raf -> raf.setLength(payload.fileSize) }
+            IncomingFileState(
+                file = file,
+                totalChunks = payload.totalChunks,
+                received = BooleanArray(payload.totalChunks)
+            )
+        }
+        val offset = payload.index * FILE_CHUNK_SIZE
+        RandomAccessFile(state.file, "rw").use { raf ->
+            raf.seek(offset.toLong())
+            raf.write(plain)
+        }
+        if (!state.received[payload.index]) {
+            state.received[payload.index] = true
+            state.receivedCount += 1
+        }
+        if (payload.counter > localCounter) {
+            localCounter = payload.counter
+        }
+        repository.updateConversationCounter(conversation.id, payload.counter)
+
+        if (state.receivedCount == state.totalChunks) {
+            incomingFiles.remove(payload.fileId)
+            repository.insertMessage(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversation.id,
+                    timestamp = System.currentTimeMillis(),
+                    direction = "IN",
+                    plaintextPreview = "Datei: ${payload.fileName}",
+                    ciphertextHexOptional = null,
+                    counterUsed = payload.counter,
+                    fileId = payload.fileId,
+                    fileName = payload.fileName,
+                    filePath = state.file.absolutePath,
+                    fileSize = payload.fileSize,
+                    mimeType = payload.mimeType
+                )
+            )
+        }
+    }
+
+    fun wipeConversation() {
+        viewModelScope.launch {
+            repository.deleteConversation(conversationId)
+        }
+    }
+
+    private suspend fun handleHello(conversation: ConversationEntity, payload: ChatPayload.Hello) {
+        if (payload.roomId != conversation.seedB64) return
+        val seed = SeedManager.decodeSeed(conversation.seedB64)
+        val expectedMac = KeyExchange.computeHelloMac(seed, payload.publicKey)
+        if (!expectedMac.contentEquals(payload.mac)) return
+        if (payload.publicKey.contentEquals(KeyExchange.decodeKey(conversation.localPublicKeyB64))) {
+            return
+        }
+        val remoteKeyB64 = KeyExchange.encodeKey(payload.publicKey)
+        repository.updateRemoteKey(conversation.id, remoteKeyB64)
+        deriveSessionKey(conversation.copy(remotePublicKeyB64 = remoteKeyB64))
+    }
+
+    private fun sendHello(conversation: ConversationEntity) {
+        val seed = SeedManager.decodeSeed(conversation.seedB64)
+        val pubKey = KeyExchange.decodeKey(conversation.localPublicKeyB64)
+        val mac = KeyExchange.computeHelloMac(seed, pubKey)
+        viewModelScope.launch {
+            currentClient?.sendMessage(ChatPayload.Hello(conversation.seedB64, pubKey, mac))
+        }
+        if (conversation.remotePublicKeyB64 != null) {
+            deriveSessionKey(conversation)
+        }
+    }
+
+    private fun deriveSessionKey(conversation: ConversationEntity) {
+        val remote = conversation.remotePublicKeyB64 ?: return
+        val localPrivate = KeyExchange.decodeKey(conversation.localPrivateKeyB64)
+        val remotePublic = KeyExchange.decodeKey(remote)
+        val shared = KeyExchange.deriveSharedSecret(localPrivate, remotePublic)
+        val seed = SeedManager.decodeSeed(conversation.seedB64)
+        val info = "mycelia-aead".toByteArray(StandardCharsets.UTF_8)
+        sessionKey = Hkdf.deriveKey(shared, seed, info, 32)
+        flushPending(conversation)
+    }
+
+    private fun nextCounter(conversation: ConversationEntity): Long {
+        if (localCounter < conversation.lastCounter) {
+            localCounter = conversation.lastCounter
+        }
+        localCounter += 1
+        return localCounter
+    }
+
+    private suspend fun sendMessageInternal(conversation: ConversationEntity, key: ByteArray, text: String) {
+        val counter = nextCounter(conversation)
+        val nonce = buildNonce(counter)
+        val aad = buildAad(conversation.seedB64, counter)
+        val plainBytes = text.toByteArray(StandardCharsets.UTF_8)
+        val cipherRaw = cryptoEngine.aeadEncrypt(key, nonce, plainBytes, aad)
+        val cipher = if (compressionEnabled.value) {
+            CompressionUtils.compress(cipherRaw)
+        } else {
+            cipherRaw
+        }
+        val payload = ChatPayload.Message(conversation.seedB64, cipher, counter)
+        currentClient?.sendMessage(payload)
+        sentCounters.add(counter)
+
+        val preview = text.take(200)
+        repository.insertMessage(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversation.id,
+                timestamp = System.currentTimeMillis(),
+                direction = "OUT",
+                plaintextPreview = preview,
+                ciphertextHexOptional = null,
+                counterUsed = counter
+            )
+        )
+        repository.updateConversationCounter(conversation.id, counter)
+    }
+
+    private fun flushPending(conversation: ConversationEntity) {
+        val key = sessionKey ?: return
+        if (pendingMessages.isEmpty()) return
+        val queue = pendingMessages.toList()
+        pendingMessages.clear()
+        viewModelScope.launch {
+            for (message in queue) {
+                sendMessageInternal(conversation, key, message)
+            }
+        }
+    }
+
+    private suspend fun sendFileInternal(conversation: ConversationEntity, key: ByteArray, uri: Uri) {
+        val resolver = context.contentResolver
+        val meta = resolver.query(uri, null, null, null, null)
+        var fileName = "file.bin"
+        var mimeType = resolver.getType(uri) ?: "application/octet-stream"
+        var fileSize = 0L
+        meta?.use { cursor ->
+            val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+            if (cursor.moveToFirst()) {
+                if (nameIdx >= 0) fileName = cursor.getString(nameIdx)
+                if (sizeIdx >= 0) fileSize = cursor.getLong(sizeIdx)
+            }
+        }
+        if (fileSize <= 0L) {
+            resolver.openInputStream(uri)?.use { stream ->
+                fileSize = stream.available().toLong()
+            }
+        }
+        val fileId = UUID.randomUUID().toString()
+        val totalChunks = ((fileSize + FILE_CHUNK_SIZE - 1) / FILE_CHUNK_SIZE).toInt()
+        resolver.openInputStream(uri)?.use { stream ->
+            var index = 0
+            val buffer = ByteArray(FILE_CHUNK_SIZE)
+            while (true) {
+                val read = stream.read(buffer)
+                if (read <= 0) break
+                val chunk = buffer.copyOf(read)
+                val counter = nextCounter(conversation)
+                val nonce = buildNonce(counter)
+                val aad = buildAad(conversation.seedB64, counter)
+                val cipher = cryptoEngine.aeadEncrypt(key, nonce, chunk, aad)
+                val payload = ChatPayload.FileChunk(
+                    roomId = conversation.seedB64,
+                    fileId = fileId,
+                    fileName = fileName,
+                    mimeType = mimeType,
+                    fileSize = fileSize,
+                    index = index,
+                    totalChunks = totalChunks,
+                    bodyCipher = cipher,
+                    counter = counter
+                )
+                currentClient?.sendMessage(payload)
+                sentCounters.add(counter)
+                repository.updateConversationCounter(conversation.id, counter)
+                index += 1
+            }
+        }
+        repository.insertMessage(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversation.id,
+                timestamp = System.currentTimeMillis(),
+                direction = "OUT",
+                plaintextPreview = "Datei: $fileName",
+                ciphertextHexOptional = null,
+                counterUsed = localCounter,
+                fileId = fileId,
+                fileName = fileName,
+                filePath = null,
+                fileSize = fileSize,
+                mimeType = mimeType
+            )
+        )
+    }
+
+    private fun getReceivedDir(): java.io.File {
+        val base = context.getExternalFilesDir(null) ?: context.filesDir
+        val dir = java.io.File(base, "received")
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return dir
+    }
+
+    private fun buildNonce(counter: Long): ByteArray {
+        val buffer = ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN)
+        buffer.putInt(0)
+        buffer.putLong(counter)
+        return buffer.array()
+    }
+
+    private fun buildAad(roomId: String, counter: Long): ByteArray {
+        return "$roomId:$counter".toByteArray(StandardCharsets.UTF_8)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        currentClient?.stop()
+    }
+}
+
+data class ChatUiState(
+    val conversation: ConversationEntity?,
+    val messages: List<MessageEntity>,
+    val connectionState: TcpChatClient.ConnectionState
+)
+
+private data class IncomingFileState(
+    val file: java.io.File,
+    val totalChunks: Int,
+    var receivedCount: Int = 0,
+    val received: BooleanArray
+)
+
+private const val FILE_CHUNK_SIZE = 64 * 1024
