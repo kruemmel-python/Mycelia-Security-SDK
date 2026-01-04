@@ -46,6 +46,8 @@ class ChatViewModel(
     private val compressionEnabled = MutableStateFlow(false)
     private val sentCounters = mutableSetOf<Long>()
     private var sessionKey: ByteArray? = null
+    private val pendingMessages = mutableListOf<String>()
+    private var localCounter = 0L
 
     val uiState: StateFlow<ChatUiState> = combine(
         conversationState,
@@ -69,6 +71,9 @@ class ChatViewModel(
             conversationState.filterNotNull().collect { conversation ->
                 if (conversation.remotePublicKeyB64 != null) {
                     deriveSessionKey(conversation)
+                }
+                if (conversation.lastCounter > localCounter) {
+                    localCounter = conversation.lastCounter
                 }
             }
         }
@@ -111,36 +116,12 @@ class ChatViewModel(
         viewModelScope.launch {
             val conversation = conversationState.value ?: return@launch
             val key = sessionKey ?: run {
+                pendingMessages.add(trimmed)
+                sendHello(conversation)
                 _connectionState.value = TcpChatClient.ConnectionState.Error("Schlüsselaustausch ausstehend")
                 return@launch
             }
-            val counter = conversation.lastCounter + 1
-            val nonce = buildNonce(counter)
-            val aad = buildAad(conversation.seedB64, counter)
-            val plainBytes = trimmed.toByteArray(StandardCharsets.UTF_8)
-            val cipherRaw = cryptoEngine.aeadEncrypt(key, nonce, plainBytes, aad)
-            val cipher = if (compressionEnabled.value) {
-                CompressionUtils.compress(cipherRaw)
-            } else {
-                cipherRaw
-            }
-            val payload = ChatPayload.Message(conversation.seedB64, cipher, counter)
-            currentClient?.sendMessage(payload)
-            sentCounters.add(counter)
-
-            val preview = trimmed.take(200)
-            repository.insertMessage(
-                MessageEntity(
-                    id = UUID.randomUUID().toString(),
-                    conversationId = conversation.id,
-                    timestamp = System.currentTimeMillis(),
-                    direction = "OUT",
-                    plaintextPreview = preview,
-                    ciphertextHexOptional = null,
-                    counterUsed = counter
-                )
-            )
-            repository.updateConversationCounter(conversation.id, counter)
+            sendMessageInternal(conversation, key, trimmed)
         }
     }
 
@@ -151,6 +132,9 @@ class ChatViewModel(
         }
         if (payload.counter <= conversation.lastCounter) {
             return
+        }
+        if (payload.counter > localCounter) {
+            localCounter = payload.counter
         }
         val key = sessionKey ?: return
         val cipher = if (compressionEnabled.value) {
@@ -216,6 +200,57 @@ class ChatViewModel(
         val seed = SeedManager.decodeSeed(conversation.seedB64)
         val info = "mycelia-aead".toByteArray(StandardCharsets.UTF_8)
         sessionKey = Hkdf.deriveKey(shared, seed, info, 32)
+        flushPending(conversation)
+    }
+
+    private fun nextCounter(conversation: ConversationEntity): Long {
+        if (localCounter < conversation.lastCounter) {
+            localCounter = conversation.lastCounter
+        }
+        localCounter += 1
+        return localCounter
+    }
+
+    private suspend fun sendMessageInternal(conversation: ConversationEntity, key: ByteArray, text: String) {
+        val counter = nextCounter(conversation)
+        val nonce = buildNonce(counter)
+        val aad = buildAad(conversation.seedB64, counter)
+        val plainBytes = text.toByteArray(StandardCharsets.UTF_8)
+        val cipherRaw = cryptoEngine.aeadEncrypt(key, nonce, plainBytes, aad)
+        val cipher = if (compressionEnabled.value) {
+            CompressionUtils.compress(cipherRaw)
+        } else {
+            cipherRaw
+        }
+        val payload = ChatPayload.Message(conversation.seedB64, cipher, counter)
+        currentClient?.sendMessage(payload)
+        sentCounters.add(counter)
+
+        val preview = text.take(200)
+        repository.insertMessage(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversation.id,
+                timestamp = System.currentTimeMillis(),
+                direction = "OUT",
+                plaintextPreview = preview,
+                ciphertextHexOptional = null,
+                counterUsed = counter
+            )
+        )
+        repository.updateConversationCounter(conversation.id, counter)
+    }
+
+    private fun flushPending(conversation: ConversationEntity) {
+        val key = sessionKey ?: return
+        if (pendingMessages.isEmpty()) return
+        val queue = pendingMessages.toList()
+        pendingMessages.clear()
+        viewModelScope.launch {
+            for (message in queue) {
+                sendMessageInternal(conversation, key, message)
+            }
+        }
     }
 
     private fun buildNonce(counter: Long): ByteArray {
