@@ -125,6 +125,9 @@ class ChatViewModel(
 
     private suspend fun handleIncoming(conversation: ConversationEntity, payload: ChatPayload.Message) {
         if (payload.roomId != conversation.seedB64) return
+        if (payload.counter <= conversation.lastCounter) {
+            return
+        }
         val seed = SeedManager.decodeSeed(conversation.seedB64)
         val streamOffset = CounterManager.streamOffset(payload.counter, 0)
         val cipher = if (compressionEnabled.value) {

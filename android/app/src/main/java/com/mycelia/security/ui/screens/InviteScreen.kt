@@ -50,6 +50,7 @@ fun InviteScreen(
     val conversationsViewModel: ConversationsViewModel = viewModel(factory = factory)
     val conversation by inviteViewModel.conversation.collectAsState()
     var inviteCode by remember { mutableStateOf("") }
+    var chatName by remember { mutableStateOf("Session") }
     var showScanner by remember { mutableStateOf(false) }
     var cameraGranted by remember { mutableStateOf(false) }
 
@@ -91,6 +92,11 @@ fun InviteScreen(
 
             Text("Invite Code scannen oder einfügen")
             TextField(
+                value = chatName,
+                onValueChange = { chatName = it },
+                label = { Text("Chat-Name") }
+            )
+            TextField(
                 value = inviteCode,
                 onValueChange = { inviteCode = it },
                 label = { Text("Invite Code") }
@@ -103,7 +109,8 @@ fun InviteScreen(
             Button(onClick = {
                 val code = inviteCode.trim()
                 if (code.isNotEmpty()) {
-                    conversationsViewModel.joinConversation("Neue Session", code) { id ->
+                    val name = chatName.trim().ifBlank { "Session" }
+                    conversationsViewModel.joinConversation(name, code) { id ->
                         onJoinConversation(id)
                     }
                 }

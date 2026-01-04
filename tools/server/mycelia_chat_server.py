@@ -28,8 +28,10 @@ async def write_frame(writer: asyncio.StreamWriter, payload: bytes) -> None:
 
 
 class ChatServer:
-    def __init__(self) -> None:
+    def __init__(self, history_limit: int = 100) -> None:
         self.rooms: Dict[str, Set[asyncio.StreamWriter]] = defaultdict(set)
+        self.history: Dict[str, list[bytes]] = defaultdict(list)
+        self.history_limit = history_limit
         self.lock = asyncio.Lock()
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -44,6 +46,13 @@ class ChatServer:
                 return
             async with self.lock:
                 self.rooms[room_id].add(writer)
+                history = list(self.history.get(room_id, []))
+
+            for payload in history:
+                try:
+                    await write_frame(writer, payload)
+                except Exception:
+                    break
 
             while True:
                 payload = await read_frame(reader)
@@ -52,6 +61,11 @@ class ChatServer:
                     continue
                 if message.get("roomId") != room_id:
                     continue
+                async with self.lock:
+                    stored = self.history[room_id]
+                    stored.append(payload)
+                    if len(stored) > self.history_limit:
+                        del stored[: len(stored) - self.history_limit]
                 await self.broadcast(room_id, payload)
         except (asyncio.IncompleteReadError, ConnectionResetError, OSError):
             pass
