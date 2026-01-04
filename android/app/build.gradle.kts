@@ -69,7 +69,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            shaders.srcDirs("src/main/shaders_disabled")
+            shaders.setSrcDirs(listOf<String>())
         }
     }
 }
