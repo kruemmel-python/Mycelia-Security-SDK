@@ -1,0 +1,55 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, std430) buffer EnergyBuffer { float energy[]; } energyBuf;
+layout(set = 0, binding = 1, std430) buffer PhaseBuffer { float phase[]; } phaseBuf;
+layout(set = 0, binding = 2, std430) buffer InterferenceBuffer { float interference_out[]; } interferenceBuf;
+layout(set = 0, binding = 3, std430) buffer NodeFlagBuffer { int node_flag_out[]; } nodeFlagBuf;
+layout(set = 0, binding = 4, std430) buffer SpinBuffer { int spin_out[]; } spinBuf;
+layout(set = 0, binding = 5, std430) buffer TopologyBuffer { int topology_out[]; } topologyBuf;
+layout(set = 0, binding = 6, std430) buffer PressureBuffer { float pressure[]; } pressureBuf;
+layout(set = 0, binding = 7, std430) buffer GravityBuffer { float gravity[]; } gravityBuf;
+layout(set = 0, binding = 8, std430) buffer MagnetismBuffer { float magnetism[]; } magnetismBuf;
+layout(set = 0, binding = 9, std430) buffer TemperatureBuffer { float temperature[]; } temperatureBuf;
+layout(set = 0, binding = 10, std430) buffer PotentialBuffer { float potential[]; } potentialBuf;
+layout(set = 0, binding = 11, std430) buffer DriftXBuffer { float drift_x[]; } driftXBuf;
+layout(set = 0, binding = 12, std430) buffer DriftYBuffer { float drift_y[]; } driftYBuf;
+layout(set = 0, binding = 13, std430) buffer RngEnergyBuffer { float rng_energy[]; } rngEnergyBuf;
+layout(set = 0, binding = 14, std430) buffer RngPhaseBuffer { float rng_phase[]; } rngPhaseBuf;
+layout(set = 0, binding = 15, std430) buffer RngSpinBuffer { float rng_spin[]; } rngSpinBuf;
+layout(set = 0, binding = 16, std430) buffer FieldMapBuffer { float field_map[]; } fieldMapBuf;
+
+layout(push_constant) uniform InitParams {
+    float init_energy;
+    float init_phase;
+    float rng_energy;
+    float rng_phase;
+    float rng_spin;
+    uint cell_count;
+} params;
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    if (idx >= params.cell_count) {
+        return;
+    }
+
+    energyBuf.energy[idx] = params.init_energy;
+    phaseBuf.phase[idx] = params.init_phase;
+    interferenceBuf.interference_out[idx] = 0.0;
+    nodeFlagBuf.node_flag_out[idx] = 0;
+    spinBuf.spin_out[idx] = 0;
+    topologyBuf.topology_out[idx] = -1;
+    pressureBuf.pressure[idx] = 0.0;
+    gravityBuf.gravity[idx] = 0.0;
+    magnetismBuf.magnetism[idx] = 0.0;
+    temperatureBuf.temperature[idx] = 0.0;
+    potentialBuf.potential[idx] = 0.0;
+    driftXBuf.drift_x[idx] = 0.0;
+    driftYBuf.drift_y[idx] = 0.0;
+    rngEnergyBuf.rng_energy[idx] = params.rng_energy;
+    rngPhaseBuf.rng_phase[idx] = params.rng_phase;
+    rngSpinBuf.rng_spin[idx] = params.rng_spin;
+    fieldMapBuf.field_map[idx] = 0.0;
+}

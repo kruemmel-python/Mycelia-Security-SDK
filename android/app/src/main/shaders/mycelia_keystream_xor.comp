@@ -1,0 +1,107 @@
+#version 450
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 17, std430) buffer InputBuffer  { uint data[]; } inputBuf;
+layout(set = 0, binding = 18, std430) buffer OutputBuffer { uint data[]; } outputBuf;
+
+/*
+  Push-Constants: explizite Offsets (64 Byte total)
+  -> verhindert Layout-Mismatch zwischen C++ und GLSL
+*/
+layout(push_constant) uniform XorParams {
+    layout(offset = 0)  uint key[8];          // 0..31
+    layout(offset = 32) uint nonce0;          // 32..35
+    layout(offset = 36) uint nonce1;          // 36..39
+    layout(offset = 40) uint nonce2;          // 40..43
+    layout(offset = 44) uint counter_base;    // 44..47
+    layout(offset = 48) uint offset_in_block; // 48..51
+    layout(offset = 52) uint data_len;        // 52..55 (Bytes)
+    layout(offset = 56) uint _pad0;           // 56..59
+    layout(offset = 60) uint _pad1;           // 60..63
+} pc;
+
+uint rotl(uint v, uint c) {
+    return (v << c) | (v >> (32u - c));
+}
+
+void quarter_round(inout uint a, inout uint b, inout uint c, inout uint d) {
+    a += b; d ^= a; d = rotl(d, 16u);
+    c += d; b ^= c; b = rotl(b, 12u);
+    a += b; d ^= a; d = rotl(d, 8u);
+    c += d; b ^= c; b = rotl(b, 7u);
+}
+
+void chacha20_block(uint counter, out uint out_block[16]) {
+    uint state[16] = uint[16](
+        0x61707865u, 0x3320646eu, 0x79622d32u, 0x6b206574u,
+        pc.key[0], pc.key[1], pc.key[2], pc.key[3],
+        pc.key[4], pc.key[5], pc.key[6], pc.key[7],
+        counter, pc.nonce0, pc.nonce1, pc.nonce2
+    );
+
+    uint w[16];
+    for (int i = 0; i < 16; ++i) {
+        w[i] = state[i];
+    }
+
+    for (int i = 0; i < 10; ++i) {
+        quarter_round(w[0], w[4], w[8],  w[12]);
+        quarter_round(w[1], w[5], w[9],  w[13]);
+        quarter_round(w[2], w[6], w[10], w[14]);
+        quarter_round(w[3], w[7], w[11], w[15]);
+
+        quarter_round(w[0], w[5], w[10], w[15]);
+        quarter_round(w[1], w[6], w[11], w[12]);
+        quarter_round(w[2], w[7], w[8],  w[13]);
+        quarter_round(w[3], w[4], w[9],  w[14]);
+    }
+
+    for (int i = 0; i < 16; ++i) {
+        out_block[i] = w[i] + state[i];
+    }
+}
+
+uint keystream_byte(uint counter, uint byte_in_block) {
+    uint block[16];
+    chacha20_block(counter, block);
+
+    uint word  = block[byte_in_block >> 2];
+    uint shift = (byte_in_block & 3u) << 3;
+    return (word >> shift) & 0xFFu;
+}
+
+void main() {
+    uint word_idx  = gl_GlobalInvocationID.x;
+    uint base_byte = word_idx * 4u;
+
+    // data_len ist Byte-Länge
+    if (base_byte >= pc.data_len) {
+        return;
+    }
+
+    uint in_word  = inputBuf.data[word_idx];
+    uint out_word = in_word;
+
+    // Byteweise XOR innerhalb dieses 32-bit Wortes (Tail korrekt)
+    for (uint b = 0u; b < 4u; ++b) {
+        uint byte_index = base_byte + b;
+        if (byte_index >= pc.data_len) {
+            break;
+        }
+
+        // offset_in_block wird als Startoffset addiert
+        uint abs_byte = pc.offset_in_block + byte_index;
+
+        // ChaCha20: 64 Bytes pro Block -> /64 und %64
+        uint counter = pc.counter_base + (abs_byte >> 6);
+        uint key_b   = keystream_byte(counter, abs_byte & 63u);
+
+        uint in_b  = (in_word >> (b * 8u)) & 0xFFu;
+        uint out_b = in_b ^ key_b;
+
+        out_word = (out_word & ~(0xFFu << (b * 8u))) | (out_b << (b * 8u));
+    }
+
+    outputBuf.data[word_idx] = out_word;
+}
