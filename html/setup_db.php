@@ -1,7 +1,39 @@
 <?php
-$host = '127.0.0.1';
-$user = 'root';
-$pass = '1234'; // Dein Passwort
+function load_env_file($path) {
+    if (!file_exists($path)) {
+        return;
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#') || strpos($trimmed, '=') === false) {
+            continue;
+        }
+        [$key, $value] = explode('=', $trimmed, 2);
+        $key = trim($key);
+        $value = trim($value, " \t\n\r\0\x0B\"'");
+        if ($key !== '' && getenv($key) === false) {
+            putenv("{$key}={$value}");
+            $_ENV[$key] = $value;
+        }
+    }
+}
+
+load_env_file(__DIR__ . '/.env');
+
+function require_env($name) {
+    $value = getenv($name);
+    if ($value === false || $value === '') {
+        http_response_code(500);
+        die("Fehlende Umgebungsvariable: $name");
+    }
+    return $value;
+}
+
+$host = require_env('MYCELIA_DB_HOST');
+$user = require_env('MYCELIA_DB_USER');
+$pass = require_env('MYCELIA_DB_PASSWORD');
+$db_name = require_env('MYCELIA_DB_NAME');
 
 try {
     // 1. Verbindung ohne DB, um sie zu erstellen
@@ -11,11 +43,11 @@ try {
     echo "Verbindung zu MySQL erfolgreich.<br>";
 
     // 2. Datenbank erstellen
-    $pdo->exec("CREATE DATABASE IF NOT EXISTS mycelia_secure_db");
-    echo "Datenbank 'mycelia_secure_db' geprüft/erstellt.<br>";
+    $pdo->exec("CREATE DATABASE IF NOT EXISTS {$db_name}");
+    echo "Datenbank '{$db_name}' geprüft/erstellt.<br>";
 
     // 3. Tabelle erstellen
-    $pdo->exec("USE mycelia_secure_db");
+    $pdo->exec("USE {$db_name}");
     $sql = "CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         username VARCHAR(50) NOT NULL UNIQUE,

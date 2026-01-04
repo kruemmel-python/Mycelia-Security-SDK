@@ -14,16 +14,38 @@ except ImportError:
     exit(1)
 
 # --- Konfiguration ---
+def load_dotenv(path: str) -> None:
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+def require_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
 app = Flask(__name__)
-app.secret_key = "WebSessionSecretKey"
-APP_SECRET = "MeinSuperGeheimesServerPasswort2025" 
+app.secret_key = require_env("MYCELIA_FLASK_SECRET")
+APP_SECRET = require_env("MYCELIA_ENGINE_PASSWORD")
 
 # MySQL Konfiguration
 db_config = {
-    'user': 'root',
-    'password': '1234',  # Dein Passwort
-    'host': '127.0.0.1',
-    'database': 'mycelia_secure_db',
+    'user': require_env("MYCELIA_DB_USER"),
+    'password': require_env("MYCELIA_DB_PASSWORD"),
+    'host': require_env("MYCELIA_DB_HOST"),
+    'database': require_env("MYCELIA_DB_NAME"),
     'raise_on_warnings': False
 }
 
