@@ -2,14 +2,33 @@
 
 #include <jni.h>
 #include <vector>
+#include <cstdint>
+
+static std::vector<uint8_t> toVector(JNIEnv *env, jbyteArray arr) {
+    if (!arr) {
+        return {};
+    }
+    jsize len = env->GetArrayLength(arr);
+    std::vector<uint8_t> buf(static_cast<size_t>(len));
+    if (len > 0) {
+        env->GetByteArrayRegion(arr, 0, len, reinterpret_cast<jbyte *>(buf.data()));
+    }
+    return buf;
+}
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_mycelia_security_MyceliaNative_nativeInit(JNIEnv *env, jobject, jstring shaderDir) {
-    const char *dir = env->GetStringUTFChars(shaderDir, nullptr);
+Java_com_mycelia_security_crypto_MyceliaNative_nativeInit(JNIEnv *env, jobject /*thiz*/, jstring shaderDir) {
+    const char *dir = nullptr;
+    if (shaderDir) {
+        dir = env->GetStringUTFChars(shaderDir, nullptr);
+    }
+
     auto *compute = new MyceliaVulkanCompute(dir ? dir : "");
-    if (dir) {
+
+    if (shaderDir && dir) {
         env->ReleaseStringUTFChars(shaderDir, dir);
     }
+
     if (!compute->initialize()) {
         delete compute;
         return 0;
@@ -18,7 +37,7 @@ Java_com_mycelia_security_MyceliaNative_nativeInit(JNIEnv *env, jobject, jstring
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_mycelia_security_MyceliaNative_nativeRelease(JNIEnv *, jobject, jlong handle) {
+Java_com_mycelia_security_crypto_MyceliaNative_nativeRelease(JNIEnv * /*env*/, jobject /*thiz*/, jlong handle) {
     auto *compute = reinterpret_cast<MyceliaVulkanCompute *>(handle);
     if (!compute) {
         return;
@@ -27,20 +46,13 @@ Java_com_mycelia_security_MyceliaNative_nativeRelease(JNIEnv *, jobject, jlong h
     delete compute;
 }
 
-static std::vector<uint8_t> toVector(JNIEnv *env, jbyteArray arr) {
-    jsize len = env->GetArrayLength(arr);
-    std::vector<uint8_t> buf(static_cast<size_t>(len));
-    env->GetByteArrayRegion(arr, 0, len, reinterpret_cast<jbyte *>(buf.data()));
-    return buf;
-}
-
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_mycelia_security_MyceliaNative_nativeEncrypt(JNIEnv *env,
-                                                      jobject,
-                                                      jlong handle,
-                                                      jbyteArray input,
-                                                      jbyteArray seed,
-                                                      jlong streamOffset) {
+Java_com_mycelia_security_crypto_MyceliaNative_nativeEncrypt(JNIEnv *env,
+                                                             jobject /*thiz*/,
+                                                             jlong handle,
+                                                             jbyteArray input,
+                                                             jbyteArray seed,
+                                                             jlong streamOffset) {
     auto *compute = reinterpret_cast<MyceliaVulkanCompute *>(handle);
     if (!compute) {
         return nullptr;
@@ -55,18 +67,20 @@ Java_com_mycelia_security_MyceliaNative_nativeEncrypt(JNIEnv *env,
     }
 
     jbyteArray result = env->NewByteArray(static_cast<jsize>(output.size()));
-    env->SetByteArrayRegion(result, 0, static_cast<jsize>(output.size()),
-                            reinterpret_cast<jbyte *>(output.data()));
+    if (result && !output.empty()) {
+        env->SetByteArrayRegion(result, 0, static_cast<jsize>(output.size()),
+                                reinterpret_cast<const jbyte *>(output.data()));
+    }
     return result;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_mycelia_security_MyceliaNative_nativeDecrypt(JNIEnv *env,
-                                                      jobject,
-                                                      jlong handle,
-                                                      jbyteArray input,
-                                                      jbyteArray seed,
-                                                      jlong streamOffset) {
+Java_com_mycelia_security_crypto_MyceliaNative_nativeDecrypt(JNIEnv *env,
+                                                             jobject /*thiz*/,
+                                                             jlong handle,
+                                                             jbyteArray input,
+                                                             jbyteArray seed,
+                                                             jlong streamOffset) {
     auto *compute = reinterpret_cast<MyceliaVulkanCompute *>(handle);
     if (!compute) {
         return nullptr;
@@ -81,7 +95,9 @@ Java_com_mycelia_security_MyceliaNative_nativeDecrypt(JNIEnv *env,
     }
 
     jbyteArray result = env->NewByteArray(static_cast<jsize>(output.size()));
-    env->SetByteArrayRegion(result, 0, static_cast<jsize>(output.size()),
-                            reinterpret_cast<jbyte *>(output.data()));
+    if (result && !output.empty()) {
+        env->SetByteArrayRegion(result, 0, static_cast<jsize>(output.size()),
+                                reinterpret_cast<const jbyte *>(output.data()));
+    }
     return result;
 }
