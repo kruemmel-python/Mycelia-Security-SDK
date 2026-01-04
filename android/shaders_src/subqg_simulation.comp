@@ -34,23 +34,22 @@ layout(push_constant) uniform SimParams {
 #define M_PI 3.14159265358979323846
 #endif
 
-float sample_field(const float f[], int x, int y, int W, int H) {
+int clamp_index(int x, int y, int W, int H) {
     if (x < 0) { x = 0; }
     if (x >= W) { x = W - 1; }
     if (y < 0) { y = 0; }
     if (y >= H) { y = H - 1; }
-    int s_idx = y * W + x;
-    return f[s_idx];
+    return y * W + x;
 }
 
-float laplace5(const float f[], int x, int y, int W, int H) {
-    float c = sample_field(f, x, y, W, H);
-    float u = sample_field(f, x, y - 1, W, H);
-    float d = sample_field(f, x, y + 1, W, H);
-    float l = sample_field(f, x - 1, y, W, H);
-    float r = sample_field(f, x + 1, y, W, H);
-    return (u + d + l + r - 4.0 * c);
-}
+#define SAMPLE_FIELD(buf, x, y, W, H) (buf[clamp_index((x), (y), (W), (H))])
+#define LAPLACE5(buf, x, y, W, H) \
+    (SAMPLE_FIELD((buf), (x), (y), (W), (H)) \
+    + SAMPLE_FIELD((buf), (x), (y) - 1, (W), (H)) \
+    + SAMPLE_FIELD((buf), (x), (y) + 1, (W), (H)) \
+    + SAMPLE_FIELD((buf), (x) - 1, (y), (W), (H)) \
+    + SAMPLE_FIELD((buf), (x) + 1, (y), (W), (H)) \
+    - 4.0 * SAMPLE_FIELD((buf), (x), (y), (W), (H)))
 
 float clamp_field(float v, float lo, float hi) {
     return min(hi, max(lo, v));
@@ -84,12 +83,12 @@ void main() {
     float Dx = driftXBuf.drift_x[idx];
     float Dy = driftYBuf.drift_y[idx];
 
-    float lap_E = laplace5(energyBuf.energy, x, y, W, H);
-    float lap_P = laplace5(pressureBuf.pressure, x, y, W, H);
-    float lap_G = laplace5(gravityBuf.gravity, x, y, W, H);
-    float lap_M = laplace5(magnetismBuf.magnetism, x, y, W, H);
-    float lap_T = laplace5(temperatureBuf.temperature, x, y, W, H);
-    float lap_V = laplace5(potentialBuf.potential, x, y, W, H);
+    float lap_E = LAPLACE5(energyBuf.energy, x, y, W, H);
+    float lap_P = LAPLACE5(pressureBuf.pressure, x, y, W, H);
+    float lap_G = LAPLACE5(gravityBuf.gravity, x, y, W, H);
+    float lap_M = LAPLACE5(magnetismBuf.magnetism, x, y, W, H);
+    float lap_T = LAPLACE5(temperatureBuf.temperature, x, y, W, H);
+    float lap_V = LAPLACE5(potentialBuf.potential, x, y, W, H);
 
     const float energy_diff = 0.10;
     const float pressure_diff = 0.08;
@@ -117,8 +116,8 @@ void main() {
 
     float drift_atten = 0.95;
     float accel_scale = 0.05;
-    float gradEx = (sample_field(energyBuf.energy, x + 1, y, W, H) - sample_field(energyBuf.energy, x - 1, y, W, H)) * 0.5;
-    float gradEy = (sample_field(energyBuf.energy, x, y + 1, W, H) - sample_field(energyBuf.energy, x, y - 1, W, H)) * 0.5;
+    float gradEx = (SAMPLE_FIELD(energyBuf.energy, x + 1, y, W, H) - SAMPLE_FIELD(energyBuf.energy, x - 1, y, W, H)) * 0.5;
+    float gradEy = (SAMPLE_FIELD(energyBuf.energy, x, y + 1, W, H) - SAMPLE_FIELD(energyBuf.energy, x, y - 1, W, H)) * 0.5;
     float new_Dx = drift_atten * Dx + accel_scale * gradEx;
     float new_Dy = drift_atten * Dy + accel_scale * gradEy;
 
