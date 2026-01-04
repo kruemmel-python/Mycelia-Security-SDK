@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mycelia.security.MyceliaViewModelFactory
 import com.mycelia.security.data.MessageEntity
@@ -96,7 +97,7 @@ fun ChatScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(state.messages) { message ->
-                    MessageBubble(message)
+                    MessageBubble(message, context)
                 }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -146,7 +147,7 @@ fun ChatScreen(
 }
 
 @Composable
-private fun MessageBubble(message: MessageEntity) {
+private fun MessageBubble(message: MessageEntity, context: android.content.Context) {
     val alignment = if (message.direction == "OUT") Alignment.End else Alignment.Start
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
         val display = if (message.fileName != null) {
@@ -158,10 +159,27 @@ private fun MessageBubble(message: MessageEntity) {
         } else {
             message.plaintextPreview
         }
+        val clickableModifier = if (message.filePath != null && message.fileName != null) {
+            Modifier.clickable {
+                val file = java.io.File(message.filePath)
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    file
+                )
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, message.mimeType ?: "*/*")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+            }
+        } else {
+            Modifier
+        }
         Text(
             text = display,
             style = MaterialTheme.typography.bodyLarge,
-            modifier = Modifier.padding(12.dp)
+            modifier = clickableModifier.padding(12.dp)
         )
     }
 }
