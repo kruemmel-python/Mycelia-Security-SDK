@@ -12,7 +12,7 @@ import com.mycelia.security.ui.SettingsViewModel
 class MyceliaViewModelFactory(private val app: MyceliaApp) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>, extras: CreationExtras): T {
         val savedStateHandle = extras.createSavedStateHandle()
-        return when {
+        val viewModel = when {
             modelClass.isAssignableFrom(ConversationsViewModel::class.java) -> {
                 ConversationsViewModel(app.chatRepository)
             }
@@ -32,6 +32,8 @@ class MyceliaViewModelFactory(private val app: MyceliaApp) : ViewModelProvider.F
                 InviteViewModel(app.chatRepository, savedStateHandle)
             }
             else -> throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
-        } as T
+        }
+        @Suppress("UNCHECKED_CAST")
+        return viewModel as T
     }
 }

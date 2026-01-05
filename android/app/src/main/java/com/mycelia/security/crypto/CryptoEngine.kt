@@ -10,15 +10,25 @@ class CryptoEngine(private val context: Context) {
     val nativeAvailable: Boolean
 
     init {
-        var nativeHandle = 0L
-        var nativeImpl: MyceliaNative? = null
-        try {
-            val shaderDir = ShaderAssetManager.ensureShaders(context)
-            nativeImpl = MyceliaNative()
-            nativeHandle = nativeImpl.nativeInit(shaderDir)
-        } catch (_: Exception) {
-            nativeHandle = 0L
+        var nativeHandle: Long
+        var nativeImpl: MyceliaNative?
+        val shaderDir = runCatching { ShaderAssetManager.ensureShaders(context) }.getOrNull()
+        if (shaderDir == null) {
             nativeImpl = null
+            nativeHandle = 0L
+        } else {
+            val initResult = runCatching {
+                val impl = MyceliaNative()
+                val handle = impl.nativeInit(shaderDir)
+                impl to handle
+            }.getOrNull()
+            if (initResult == null || initResult.second == 0L) {
+                nativeImpl = null
+                nativeHandle = 0L
+            } else {
+                nativeImpl = initResult.first
+                nativeHandle = initResult.second
+            }
         }
         native = nativeImpl
         handle = nativeHandle
